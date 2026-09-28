@@ -1,0 +1,5 @@
+.git
+*.pem
+geoip/
+config.yaml
+imap-ja4-proxy

@@ -1,0 +1,26 @@
+server:
+  listen_addr: ":993"
+  backend_imap_addr: "imap-backend:143"
+  cert_file: "cert.pem"
+  key_file: "key.pem"
+
+redis:
+  addr: "imap-redis:6379"
+  queue_buffer_size: 10000
+
+logging:
+  level: "info"
+
+security:
+  deep_inspection_mode: true
+  geoip_db_path: "/geoip/GeoLite2-Country.mmdb"
+  thresholds:
+    tarpit_soft: 30
+    tarpit_hard: 60
+    drop: 90
+  weights:
+    ja4_unknown: 25
+    geo_anomaly: 35
+    user_not_found: 50
+    password_invalid: 30
+    login_success_discount: 20

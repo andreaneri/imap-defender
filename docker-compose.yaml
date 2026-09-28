@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  imap-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: imap-proxy
+    ports:
+      - "993:993"
+    volumes:
+      # Il flag :Z risolve i blocchi SELinux tipici di Podman su sistemi RHEL/Fedora
+      - ./config.yaml:/config.yaml:Z
+      - ./cert.pem:/cert.pem:Z
+      - ./key.pem:/key.pem:Z
+      - ./geoip:/geoip:ro,Z
+    depends_on:
+      - imap-redis
+      - imap-backend
+    healthcheck:
+      test: ["CMD", "/imap-ja4-proxy", "--healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - imap-net
+    restart: unless-stopped
+
+  imap-redis:
+    # Nome immagine completamente qualificato per evitare prompt interattivi in Podman
+    image: docker.io/library/redis:7-alpine
+    container_name: imap-redis
+    networks:
+      - imap-net
+    restart: unless-stopped
+
+  imap-backend:
+    # Nome immagine completamente qualificato
+    image: docker.io/dovecon/dovecot:latest
+    container_name: imap-backend
+    environment:
+      - DOVECOT_PROTOCOLS=imap
+    networks:
+      - imap-net
+    restart: unless-stopped
+
+networks:
+  imap-net:
+    driver: bridge
