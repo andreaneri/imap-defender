@@ -1,2 +1,2 @@
 # imap-defender
-a light reverse proxy tls with a rate limiter fingerprint (J44) based
+a light reverse proxy tls with a rate limiter fingerprint (JA4) based
