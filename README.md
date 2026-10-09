@@ -1,14 +1,18 @@
 # imap-defender
 
-Proxy IMAP in Go pensato per terminare TLS e applicare controlli di rischio prima di inoltrare le sessioni a un backend IMAP. Il prototipo include fingerprint JA4, lookup GeoIP opzionale, mitigazioni `ALLOW` / tarpit / `DROP`, modalità di ispezione del comando `LOGIN` e tracciamento asincrono su Redis.
+**IMAP Defender** è un prototipo di proxy IMAP in Go per sperimentare la mitigazione degli accessi automatizzati e proteggere i backend di posta. Termina TLS in ingresso e utilizza segnali come fingerprint JA4, GeoIP opzionale e Redis per valutare il rischio.
 
-## Stato
+> **Stato: prototipo sperimentale, non pronto per la produzione.** La Deep Inspection usa ancora un mock di autenticazione e non gestisce tutti i flussi IMAP. Non esporre il servizio a traffico reale o credenziali di utenti reali.
 
-L'autenticazione in modalità Deep Inspection usa ancora un mock (`mario` / `segreta`): non collegare questo prototipo a un servizio esposto o considerarlo pronto per la produzione. La modalità Light non ispeziona le credenziali e si basa solo sui segnali perimetrali disponibili. Consultare [TODO.md](TODO.md) per il backlog e [la documentazione tecnica](docs/DOCUMENTAZIONE.md) per architettura e operatività.
+## Stato del progetto
+
+L'implementazione attuale distingue **Light** e **Deep Inspection** tramite `security.deep_inspection_mode`. Le modalità operative **Transparent**, **Learning** e **Defender** sono concordate ma non ancora implementate.
+
+Per il comportamento effettivo, le limitazioni e l'evoluzione prevista consultare [Architettura e stato](docs/architecture.md); per le attività aperte consultare [TODO.md](TODO.md).
 
 ## Avvio locale
 
-Requisiti: Go compatibile con `go.mod`, OpenSSL e Docker Compose oppure Podman Compose.
+Requisiti: Go secondo [go.mod](go.mod), OpenSSL e Docker Compose (o Podman Compose compatibile).
 
 ```sh
 make help
@@ -16,7 +20,7 @@ make certs
 make up
 ```
 
-Compose pubblica il proxy sulla porta `993` e avvia Redis e Dovecot. Il database GeoLite2 Country è opzionale: se non è presente in `geoip/`, il proxy continua usando il country code neutro `ZZ`. Per scaricare e aggiornare il database, seguire la procedura GeoLite nella [documentazione](docs/DOCUMENTAZIONE.md#provisioning-e-aggiornamento-di-geolite2-country).
+Lo stack di test espone il proxy sulla porta `993` e avvia Redis e Dovecot. I certificati generati sono destinati esclusivamente ai test locali. Il database GeoLite2 Country è opzionale: in sua assenza il proxy usa il country code neutro `ZZ`.
 
 Per arrestare lo stack:
 
@@ -28,16 +32,17 @@ make down
 
 ```sh
 make test
+make bench
 make build-local
 ```
 
-I certificati di test, i database GeoLite e gli eseguibili compilati sono file locali esclusi da Git. Per configurazione, hot reload, log e altri target Make, vedere [docs/DOCUMENTAZIONE.md](docs/DOCUMENTAZIONE.md).
+I test automatici non certificano la compatibilità IMAP end-to-end né la sicurezza per la produzione. Per configurazione, GeoLite2, hot reload e altri comandi Make consultare la [documentazione tecnica](docs/DOCUMENTAZIONE.md).
 
-## Collaborazione e architettura
+## Documentazione e collaborazione
 
-- [AGENTS.md](AGENTS.md): istruzioni per gli assistenti e workflow Git.
-- [Architettura e stato](docs/architecture.md): comportamento attuale e obiettivi concordati.
-- [Decisioni architetturali](docs/adr/README.md): registro degli ADR.
-- [Istruzioni del progetto ChatGPT](docs/chatgpt-project-instructions.md): testo condiviso da inserire nelle impostazioni del progetto.
-
-Le modalità Transparent, Learning e Defender sono concordate e ancora da implementare; Light e Deep Inspection descrivono la selezione attualmente disponibile.
+- [Architettura e stato](docs/architecture.md): comportamento implementato, limiti e direzione architetturale.
+- [Documentazione tecnica](docs/DOCUMENTAZIONE.md): dettagli operativi e implementativi.
+- [ADR](docs/adr/README.md): motivazioni e storia delle decisioni architetturali.
+- [TODO](TODO.md): attività da realizzare e avanzamento.
+- [AGENTS.md](AGENTS.md): convenzioni e workflow per gli assistenti.
+- [Istruzioni del progetto ChatGPT](docs/chatgpt-project-instructions.md): contesto condiviso del progetto.
