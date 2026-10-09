@@ -1,5 +1,7 @@
 # Adaptive IMAP Proxy - Documentazione Architetturale e Tecnica
 
+> Per la fotografia del comportamento implementato, i limiti e le modalità concordate consultare [architecture.md](architecture.md). Questa guida contiene anche descrizioni progettuali: verificarle rispetto al codice corrente. Le decisioni condivise sono negli [ADR](adr/README.md).
+
 ## Indice dei Contenuti
 1. [Visione Generale dell'Architettura](#1-visione-generale-dellarchitettura)
 2. [Ciclo di Vita della Connessione e Fingerprinting TLS (JA4+)](#2-ciclo-di-vita-della-connessione-e-fingerprinting-tls-ja4)
