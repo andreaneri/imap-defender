@@ -1,7 +1,4 @@
 # imap-defender
-<<<<<<< HEAD
-a light reverse proxy tls with a rate limiter fingerprint (JA4) based
-=======
 
 Proxy IMAP in Go pensato per terminare TLS e applicare controlli di rischio prima di inoltrare le sessioni a un backend IMAP. Il prototipo include fingerprint JA4, lookup GeoIP opzionale, mitigazioni `ALLOW` / tarpit / `DROP`, modalità di ispezione del comando `LOGIN` e tracciamento asincrono su Redis.
 
@@ -35,4 +32,12 @@ make build-local
 ```
 
 I certificati di test, i database GeoLite e gli eseguibili compilati sono file locali esclusi da Git. Per configurazione, hot reload, log e altri target Make, vedere [docs/DOCUMENTAZIONE.md](docs/DOCUMENTAZIONE.md).
->>>>>>> fb14916 (docs: add project documentation and backlog)
+
+## Collaborazione e architettura
+
+- [AGENTS.md](AGENTS.md): istruzioni per gli assistenti e workflow Git.
+- [Architettura e stato](docs/architecture.md): comportamento attuale e obiettivi concordati.
+- [Decisioni architetturali](docs/adr/README.md): registro degli ADR.
+- [Istruzioni del progetto ChatGPT](docs/chatgpt-project-instructions.md): testo condiviso da inserire nelle impostazioni del progetto.
+
+Le modalità Transparent, Learning e Defender sono concordate e ancora da implementare; Light e Deep Inspection descrivono la selezione attualmente disponibile.
