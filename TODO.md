@@ -97,3 +97,17 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
     - Dimensione della coda bufferizzata Redis e dropped logs counter.
 - [ ] **Dashboard Grafana / Template Loki**:
   - Fornire dashboard preconfigurate per visualizzare in tempo reale gli eventi estratti dai log JSON (`log/slog`).
+
+---
+
+## 8. Evoluzione architetturale
+- [ ] **Separazione delle responsabilità in package Go**:
+  - Rifattorizzare progressivamente l'attuale `main.go`, mantenendo `package main` come punto di ingresso e composition root.
+  - Individuare confini coerenti per protocollo IMAP, proxy/TLS e relay, osservazione, risk engine, Redis e configurazione, senza imporre un package per ciascuna responsabilità prima dell'analisi delle dipendenze.
+  - Evitare package generici come `utils`, interfacce premature e dipendenze circolari; mantenere API interne minime.
+  - Procedere per piccoli commit senza cambiamenti funzionali, spostando e adattando i test insieme al codice; verificare `make test`, `make build-local`, `make build-linux` e `go vet ./...`.
+  - Pianificare la sequenza rispetto alle correzioni del protocollo IMAP e all'implementazione delle modalità operative, evitando di mescolare refactoring e nuove funzionalità nella stessa PR.
+- [ ] **Implementazione delle modalità operative** ([ADR 0002](docs/adr/0002-operating-modes.md)):
+  - Definire compatibilità e migrazione della configurazione da `deep_inspection_mode`, valori predefiniti e comportamento in caso di Redis indisponibile.
+  - Implementare Transparent senza mitigazioni deliberate, Learning con osservazione degli esiti reali e apprendimento Redis, Defender con enforcement configurabile.
+  - Aggiungere test di protocollo, concorrenza, timeout e comportamento per ciascuna modalità.
