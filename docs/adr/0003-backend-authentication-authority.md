@@ -2,7 +2,7 @@
 
 - Data: 2026-10-10
 - Stato: Accettato
-- Implementazione: pendente; questo ADR non modifica il runtime
+- Implementazione: parziale nel branch feat/passive-imap-auth-observer; il relay non autentica localmente, ma osservatore e modalità richiedono ancora hardening
 
 ## Contesto
 

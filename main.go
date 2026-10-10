@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -50,7 +48,6 @@ type LoggingConfig struct {
 }
 
 type SecurityConfig struct {
-	DeepInspectionMode bool            `yaml:"deep_inspection_mode"`
 	GeoIPDBPath        string          `yaml:"geoip_db_path"`
 	Thresholds         ThresholdConfig `yaml:"thresholds"`
 	Weights            WeightConfig    `yaml:"weights"`
@@ -65,9 +62,6 @@ type ThresholdConfig struct {
 type WeightConfig struct {
 	JA4Unknown           int `yaml:"ja4_unknown"`
 	GeoAnomaly           int `yaml:"geo_anomaly"`
-	UserNotFound         int `yaml:"user_not_found"`
-	PasswordInvalid      int `yaml:"password_invalid"`
-	LoginSuccessDiscount int `yaml:"login_success_discount"`
 }
 
 type AtomicConfig struct {
@@ -125,9 +119,6 @@ func validateConfig(c *Config) error {
 	}{
 		{"ja4_unknown", w.JA4Unknown},
 		{"geo_anomaly", w.GeoAnomaly},
-		{"user_not_found", w.UserNotFound},
-		{"password_invalid", w.PasswordInvalid},
-		{"login_success_discount", w.LoginSuccessDiscount},
 	}
 	for _, weight := range weights {
 		if weight.value < 0 || weight.value > 100 {
@@ -173,13 +164,6 @@ func initLogger(levelStr string) {
 
 // --- MODULO 2: DATI & STRUTTURE COMPONENTI ---
 
-type IMAPAuthCommand struct {
-	Tag      string
-	Username string
-	Password string
-	Found    bool
-}
-
 type LoginEvent struct {
 	JA4       string
 	Username  string
@@ -191,8 +175,6 @@ type LoginEvent struct {
 type ClientContext struct {
 	JA4Known      bool
 	CountryCode   string
-	UserExists    bool
-	PasswordValid bool
 	RemoteIP      string
 }
 
@@ -327,14 +309,6 @@ func EvaluateRisk(ctx *ClientContext, secCfg SecurityConfig) (action string, del
 		score += secCfg.Weights.GeoAnomaly
 	}
 
-	if !ctx.UserExists {
-		score += secCfg.Weights.UserNotFound
-	}
-	if !ctx.PasswordValid {
-		score += secCfg.Weights.PasswordInvalid
-	} else if ctx.UserExists {
-		score -= secCfg.Weights.LoginSuccessDiscount
-	}
 
 	if score < 0 {
 		score = 0
@@ -360,41 +334,6 @@ func EvaluateRisk(ctx *ClientContext, secCfg SecurityConfig) (action string, del
 	default:
 		return "ALLOW", 0
 	}
-}
-
-// --- MODULO 5: PARSER IMAP INLINE ---
-
-func parseIMAPLogin(reader *bufio.Reader) (*IMAPAuthCommand, error) {
-	const maxLines = 10
-	for i := 0; i < maxLines; i++ {
-		lineBytes, isPrefix, err := reader.ReadLine()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
-		}
-		if isPrefix {
-			return nil, fmt.Errorf("linea troppo lunga")
-		}
-
-		line := strings.TrimSpace(string(lineBytes))
-		tokens := strings.Fields(line)
-		if len(tokens) < 3 {
-			continue
-		}
-
-		if strings.ToUpper(tokens[1]) == "LOGIN" {
-			authCmd := &IMAPAuthCommand{Tag: tokens[0], Found: true}
-			authCmd.Username = strings.Trim(tokens[2], `"`)
-			if len(tokens) > 3 {
-				rawPassword := strings.Join(tokens[3:], " ")
-				authCmd.Password = strings.Trim(rawPassword, `"`)
-			}
-			return authCmd, nil
-		}
-	}
-	return &IMAPAuthCommand{Found: false}, nil
 }
 
 // --- MODULO 6: PROXY ARCHITECTURE ---
@@ -524,16 +463,6 @@ func (p *IMAPProxy) Start(ctx context.Context) error {
 	}
 }
 
-func verifyCredentialsTBD(username, password string) (userExists bool, passwordValid bool) {
-	if username == "mario" {
-		if password == "segreta" {
-			return true, true
-		}
-		return true, false
-	}
-	return false, false
-}
-
 // ESTRAZIONE GEOGRAFICA REALE VIA MAXMIND
 func (p *IMAPProxy) getCountryCode(remoteAddr string) string {
 	// Separiamo l'IP dalla porta
@@ -595,94 +524,14 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 
 	slog.Debug("Handshake TLS completato", "remote_ip", remoteAddr, "ja4", ja4Fp)
 
-	// =================================================================
-	// SCENARIO A: MODALITÀ LIGHT (PARSER DISATTIVATO)
-	// =================================================================
-	if !currentCfg.Security.DeepInspectionMode {
-		country := p.getCountryCode(remoteAddr)
-		ja4Known := p.tracker.IsJA4Trusted(ja4Fp)
 
-		clientCtx := &ClientContext{
-			JA4Known:      ja4Known,
-			CountryCode:   country,
-			UserExists:    true,
-			PasswordValid: true,
-			RemoteIP:      remoteAddr,
-		}
-
-		action, delay := EvaluateRisk(clientCtx, currentCfg.Security)
-		slog.Info("Mitigazione Light eseguita", "remote_ip", remoteAddr, "action", action, "delay", delay)
-
-		if action == "DROP" {
-			return
-		}
-		if delay > 0 {
-			timer := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
-		}
-
-		backendConn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", currentCfg.Server.BackendIMAPAddr)
-		if err != nil {
-			slog.Error("Connessione al backend IMAP fallita (Light Mode)", "error", err)
-			return
-		}
-		defer backendConn.Close()
-
-		if err := relayBidirectional(tlsConn, backendConn, tlsConn); err != nil {
-			slog.Debug("Relay IMAP Light terminato con errore", "remote_ip", remoteAddr, "error", err)
-		}
-		return
-	}
-
-	// =================================================================
-	// SCENARIO B: MODALITÀ DEEP INSPECTION (PARSER ATTIVATO)
-	// =================================================================
-	clientReader := bufio.NewReader(tlsConn)
-	greeting := "* OK [CAPABILITY IMAP4rev1] Adaptive IMAP Proxy Ready\r\n"
-	if _, err := tlsConn.Write([]byte(greeting)); err != nil {
-		return
-	}
-
-	auth, err := parseIMAPLogin(clientReader)
-	if err != nil || !auth.Found {
-		slog.Warn("Nessun comando LOGIN valido", "remote_ip", remoteAddr)
-		return
-	}
-
-	userExists, passwordValid := verifyCredentialsTBD(auth.Username, auth.Password)
+	// The backend is the sole authentication authority. All IMAP bytes,
+	// including its greeting and tagged authentication responses, are relayed.
 	country := p.getCountryCode(remoteAddr)
 	ja4Known := p.tracker.IsJA4Trusted(ja4Fp)
-
-	clientCtx := &ClientContext{
-		JA4Known:      ja4Known,
-		CountryCode:   country,
-		UserExists:    userExists,
-		PasswordValid: passwordValid,
-		RemoteIP:      remoteAddr,
-	}
-
+	clientCtx := &ClientContext{JA4Known: ja4Known, CountryCode: country, RemoteIP: remoteAddr}
 	action, delay := EvaluateRisk(clientCtx, currentCfg.Security)
-
-	p.tracker.TrackEventAsync(LoginEvent{
-		JA4:       ja4Fp,
-		Username:  auth.Username,
-		RemoteIP:  remoteAddr,
-		Success:   passwordValid,
-		Timestamp: time.Now(),
-	})
-
-	slog.Info("Mitigazione Deep eseguita",
-		"remote_ip", remoteAddr,
-		"username", auth.Username,
-		"action", action,
-		"delay", delay,
-	)
-
+	slog.Info("Connection risk evaluated", "remote_ip", remoteAddr, "action", action, "delay", delay)
 	if action == "DROP" {
 		return
 	}
@@ -696,54 +545,23 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 		}
 	}
 
-	if !passwordValid {
-		failureResponse := fmt.Sprintf("%s NO Authentication failed.\r\n", auth.Tag)
-		tlsConn.Write([]byte(failureResponse))
-		return
-	}
-
 	backendConn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", currentCfg.Server.BackendIMAPAddr)
 	if err != nil {
-		slog.Error("Connessione al backend IMAP fallita (Deep Mode)", "error", err)
+		slog.Error("IMAP backend connection failed", "error", err)
 		return
 	}
 	defer backendConn.Close()
 
-	replayedCommand := fmt.Sprintf("%s LOGIN \"%s\" \"%s\"\r\n", auth.Tag, auth.Username, auth.Password)
-	if _, err := backendConn.Write([]byte(replayedCommand)); err != nil {
-		return
+	observer := newAuthObserver(func(result authResult) {
+		// Do not persist or log credentials. Learning-mode persistence is a
+		// separate change; an observed success must not grant global JA4 trust.
+		slog.Info("Backend IMAP authentication result",
+			"remote_ip", remoteAddr, "ja4", ja4Fp,
+			"method", result.Method, "outcome", result.Outcome)
+	})
+	if err := relayObserved(tlsConn, backendConn, observer); err != nil {
+		slog.Debug("IMAP relay finished", "remote_ip", remoteAddr, "error", err)
 	}
-
-	if err := relayBidirectional(tlsConn, backendConn, clientReader); err != nil {
-		slog.Debug("Relay IMAP Deep terminato con errore", "remote_ip", remoteAddr, "error", err)
-	}
-}
-
-func relayBidirectional(client, backend net.Conn, clientToBackend io.Reader) error {
-	copyErrors := make(chan error, 2)
-	copyStream := func(destination, source net.Conn) {
-		_, err := io.Copy(destination, source)
-		if closeWriter, ok := destination.(interface{ CloseWrite() error }); ok {
-			_ = closeWriter.CloseWrite()
-		}
-		copyErrors <- err
-	}
-
-	go func() {
-		_, err := io.Copy(backend, clientToBackend)
-		if closeWriter, ok := backend.(interface{ CloseWrite() error }); ok {
-			_ = closeWriter.CloseWrite()
-		}
-		copyErrors <- err
-	}()
-	go copyStream(client, backend)
-	firstErr := <-copyErrors
-	if firstErr != nil {
-		_ = client.Close()
-		_ = backend.Close()
-	}
-	secondErr := <-copyErrors
-	return errors.Join(firstErr, secondErr)
 }
 
 // --- MODULO 7: SIGNAL LISTENER (HOT RELOAD POSIX) ---
@@ -795,7 +613,7 @@ func setupSignalHandler(configFile string, atomicCfg *AtomicConfig, proxy *IMAPP
 			atomicCfg.Store(newCfg)
 			initLogger(newCfg.Logging.Level)
 
-			slog.Info("Configurazione e file GeoIP ricaricati con successo via SIGHUP", "deep_inspection", newCfg.Security.DeepInspectionMode)
+			slog.Info("Configurazione e file GeoIP ricaricati con successo via SIGHUP")
 		}
 	}()
 }

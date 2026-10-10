@@ -53,12 +53,12 @@ bench:
 
 build-local:
 	@echo "==> Compilazione binario nativo per Mac ($(LOCAL_OS)-$(LOCAL_ARCH))..."
-	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BINARY_NAME)-local main.go
+	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BINARY_NAME)-local .
 	@echo "==> Pronto: ./$(BINARY_NAME)-local"
 
 build-linux:
 	@echo "==> Cross-compilazione binario statico per Linux AMD64 (Produzione)..."
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux .
 	@echo "==> Pronto per la produzione: ./$(BINARY_NAME)-linux"
 
 clean:

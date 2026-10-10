@@ -4,40 +4,17 @@
 
 Questa fotografia descrive il codice al commit `1a5d536a1ea575256ee90072d3c160e93c2ace0f` di `main`. Va aggiornata quando cambia il comportamento. [DOCUMENTAZIONE.md](DOCUMENTAZIONE.md) conserva la guida tecnica e operativa estesa; [TODO.md](../TODO.md) raccoglie il backlog. Le descrizioni progettuali nella guida estesa vanno confrontate con il codice.
 
-## Implementazione attuale
+## Implementazione attuale (branch di lavoro)
 
-La logica è in `main.go`, i test in `main_test.go`. Il proxy termina TLS, ricava JA4 tramite `GetConfigForClient`, consulta GeoIP opzionale e Redis e inoltra verso il backend mediante TCP senza TLS nel collegamento a valle.
+Il proxy termina TLS, calcola JA4, utilizza GeoIP e inoltra byte IMAP originali verso il backend TCP. Il backend genera il greeting e le risposte di autenticazione; il mock `verifyCredentialsTBD`, il LOGIN sintetico e il replay sono rimossi. Un osservatore passivo associa tag LOGIN/AUTHENTICATE alle risposte tagged OK/NO/BAD e registra solo metodo/esito con segnali di connessione. Nessuna password viene intenzionalmente persistita.
 
-| Componente | Comportamento verificato nel codice |
-| --- | --- |
-| Configurazione | YAML validato e pubblicato tramite `AtomicConfig`; selezione Light/Deep tramite `deep_inspection_mode` |
-| Light | Consulta trust JA4 e paese, valuta il rischio e può rallentare o chiudere prima del relay; non osserva l'esito IMAP |
-| Deep Inspection | Greeting sintetico, parser limitato a LOGIN, verifica credenziali mock, valutazione rischio, evento Redis e replay al backend |
-| Risk Engine | Score limitato a 0–100; azioni ALLOW, TARPIT_SOFT (3 s), TARPIT_HARD (12 s), DROP; nessun rate limiter a contatori |
-| GeoIP | Country code ZZ per DB assente, IP locali o lookup senza risultato; IT e ZZ non aggiungono peso geografico |
-| Redis | Lookup sincrono di trust con timeout di 200 ms; coda asincrona e pipeline per gli eventi Deep |
-| Persistenza | Trust JA4 per 30 giorni su successo del mock; hash con ultimo evento per coppia JA4/account, TTL 7 giorni |
-| Lifecycle | Gestione SIGINT/SIGTERM, attesa limitata delle connessioni e del worker; SIGHUP per configurazione, certificati e GeoIP |
-| CI | Vet, test con race detector e build Linux |
+Il codice mantiene temporaneamente la valutazione del rischio per connessione basata su JA4/GeoIP, con possibili tarpit o DROP **prima del relay**. Non corrisponde ancora alla modalità Transparent: le modalità Transparent, Learning e Defender non sono implementate. Redis non riceve ancora eventi di autenticazione reali dall'osservatore; il vecchio tracker rimane per compatibilità interna, ma non viene alimentato dai risultati del backend.
 
-Gli eventi contengono JA4, username, indirizzo remoto, esito e timestamp. Il valore chiamato `RemoteIP` è attualmente l'indirizzo remoto con porta; il paese non è memorizzato nell'evento Redis.
+L'osservatore è ancora limitato: il parsing passivo di literal e SASL multilinea richiede hardening; i test end-to-end con Dovecot e la verifica completa delle condizioni avversarie restano aperti. L'hot reload TLS e GeoIP richiede ulteriori verifiche di concorrenza.
 
-## Limiti attuali
+## Decisione di autenticazione
 
-- Le modalità Transparent, Learning e Defender non sono implementate. Light può applicare mitigazioni e non equivale a Transparent.
-- Deep usa `verifyCredentialsTBD` e registra il successo prima di osservare il backend: gli eventi non dimostrano un'autenticazione reale.
-- Greeting, comandi precedenti a LOGIN, quoted strings, literal e autenticazione SASL richiedono gestione conforme al protocollo.
-- Il replay LOGIN ricostruisce le credenziali senza escaping appropriato.
-- Il trust è globale per JA4: client diversi possono condividere la fingerprint.
-- La coda piena scarta gli eventi senza bloccare; un errore di lookup Redis produce invece `false` e può aumentare il rischio.
-- L'hot reload richiede ulteriori verifiche sul ciclo di vita della configurazione TLS condivisa e sulle impostazioni che necessitano ricreazione dei componenti.
-- Mancano le metriche applicative e le politiche complete di rate limiting ed eccezioni.
-
-Il prototipo richiede questi interventi prima dell'uso in produzione.
-
-## Decisione successiva: autenticazione del backend
-
-[ADR 0003](adr/0003-backend-authentication-authority.md) stabilisce che il backend IMAP è l'unica autorità per l'autenticazione. Il proxy dovrà osservare passivamente richieste e risposte tagged già in Transparent, senza verificare credenziali o generare risposte sintetiche. Learning persisterà gli esiti reali in Redis; Defender li userà secondo politica. **Questa decisione non è ancora implementata**: la tabella iniziale descrive ancora il codice attuale.
+[ADR 0003](adr/0003-backend-authentication-authority.md) è applicato nella rimozione del mock e nell'inoltro degli esiti reali; la piena osservazione protocol-aware e l'integrazione con le modalità operative rimangono attività future.
 
 ## Architettura concordata
 
