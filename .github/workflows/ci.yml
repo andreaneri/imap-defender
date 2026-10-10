@@ -26,5 +26,11 @@ jobs:
       - name: Test with race detector
         run: make test
 
+      - name: Benchmark rate limiter
+        run: go test -run=^$ -bench=BenchmarkIPRateLimiter -benchmem -benchtime=100ms .
+
+      - name: Build local binary
+        run: make build-local
+
       - name: Build Linux binary
         run: make build-linux
