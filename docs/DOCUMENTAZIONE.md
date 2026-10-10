@@ -1,5 +1,7 @@
 # Adaptive IMAP Proxy - Documentazione Architetturale e Tecnica
 
+> **Nota di aggiornamento:** [ADR 0003](adr/0003-backend-authentication-authority.md) elimina dall'architettura obiettivo l'autenticazione locale e il pre-screening LDAP/AD. Il backend IMAP è l'unica autorità di autenticazione; il proxy osserverà passivamente richieste e risposte reali già in Transparent. I riferimenti sottostanti a verifica credenziali locale, `UserExists`/`PasswordValid` e risposte LOGIN sintetiche descrivono esclusivamente il prototipo attuale e **non sono indicazioni implementative**. La riscrittura tecnica delle sezioni di protocollo e scoring accompagnerà la modifica del runtime.
+>
 > Per la fotografia del comportamento implementato, i limiti e le modalità concordate consultare [architecture.md](architecture.md). Questa guida contiene anche descrizioni progettuali: verificarle rispetto al codice corrente. Le decisioni condivise sono negli [ADR](adr/README.md).
 
 ## Indice dei Contenuti
