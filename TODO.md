@@ -113,6 +113,7 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
   - [x] Definire migrazione da `deep_inspection_mode`, default Transparent e fail-open su Redis indisponibile (ADR 0005).
   - [x] Implementare Transparent senza mitigazioni e Learning con eventi reali e TTL Redis; selezionare solo in Defender tarpit/DROP del Risk Engine.
   - [x] Implementare rate limiting per IP e eccezioni CIDR in Defender (PR #8, ADR 0006; validazione locale differita).
-  - [ ] Definire e implementare politiche per account e contatori, senza whitelist globale JA4.
+  - [x] Aggiungere contatori Redis per esiti NO/BAD per coppia username dichiarata/IP con TTL 15 minuti (ADR 0007; verifica integrazione differita).
+  - [ ] Progettare e implementare enforcement per account nel relay IMAP, senza alterare risposte backend e senza whitelist globale JA4.
   - [x] Aggiungere test di relay TLS, concorrenza della coda, timeout/cancellazione Redis e comportamento per modalità con backend e peer RESP controllati.
   - [ ] Collaudare le modalità con Redis e Dovecot reali.
