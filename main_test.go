@@ -35,7 +35,7 @@ func TestEvaluateRisk(t *testing.T) {
 
 func TestAuthObserver(t *testing.T) {
 	var results []authResult
-	o := newAuthObserver(func(r authResult) { results = append(results, r) })
+	o := newAuthObserver(func(r authResult) { results = append(results, withoutIdentity(r)) })
 	o.observe(false, []byte("* OK backend ready\r\n"))
 	o.observe(true, []byte("A1 CAPABILITY\r\nA2 LOGIN \"test@example.org\" \"secret with spaces\"\r\n"))
 	o.observe(false, []byte("* CAPABILITY IMAP4rev1\r\nA1 OK CAPABILITY completed\r\nA2 "))
@@ -49,7 +49,7 @@ func TestAuthObserver(t *testing.T) {
 	if len(results) != 3 {
 		t.Fatalf("got %d results, want 3: %+v", len(results), results)
 	}
-	for i, want := range []authResult{{"LOGIN", "NO"}, {"AUTHENTICATE", "OK"}, {"LOGIN", "BAD"}} {
+	for i, want := range []authResult{{Method: "LOGIN", Outcome: "NO"}, {Method: "AUTHENTICATE", Outcome: "OK"}, {Method: "LOGIN", Outcome: "BAD"}} {
 		if results[i] != want {
 			t.Fatalf("result %d = %+v, want %+v", i, results[i], want)
 		}

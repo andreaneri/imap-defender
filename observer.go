@@ -8,24 +8,29 @@ import (
 	"sync"
 )
 
-// authResult contains no credentials or user identifiers.
+// authResult contains account identities and backend outcomes, never secrets.
 type authResult struct {
-	Method  string
-	Outcome string
+	Method          string
+	Outcome         string
+	Username        string
+	UsernameKnown   bool
+	AuthorizationID string
+	Mechanism       string
 }
 
 type authObserver struct {
 	mu       sync.Mutex
-	pending  map[string]string
+	pending  map[string]*authIdentity
 	callback func(authResult)
 	client   lineObserver
 	server   lineObserver
 	disabled bool
 	saslTag  string
+	current  *authIdentity
 }
 
-// Only the tag and verb are retained. Arguments, literal bodies and SASL
-// payloads are never copied into observer-owned buffers.
+// Framing retains only tag and verb. A separate bounded extractor captures
+// account identities; literal bodies and SASL payloads are not buffered.
 type lineObserver struct {
 	tokens          [2][]byte
 	field           int
@@ -43,7 +48,7 @@ const maxObservedTag = 128
 const maxPendingAuth = 64
 
 func newAuthObserver(callback func(authResult)) *authObserver {
-	return &authObserver{pending: make(map[string]string), callback: callback}
+	return &authObserver{pending: make(map[string]*authIdentity), callback: callback}
 }
 
 // disableLocked stops classification when framing or correlation is ambiguous.
@@ -56,11 +61,12 @@ func (o *authObserver) disableLocked() {
 }
 
 func (o *authObserver) finishLocked() {
-	for tag, method := range o.pending {
+	for tag, identity := range o.pending {
 		delete(o.pending, tag)
-		o.callback(authResult{Method: method, Outcome: "INDETERMINATE"})
+		o.callback(identity.result("INDETERMINATE"))
 	}
 	o.saslTag = ""
+	o.current = nil
 }
 
 func (o *authObserver) finish() {
@@ -85,12 +91,18 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 	for _, b := range chunk {
 		if state.literal > 0 {
 			state.literal--
+			if fromClient && o.current != nil {
+				o.current.literalByte(b, state.literal)
+			}
 			continue
 		}
 		if b == '\n' {
 			if !state.cr || state.quoted {
 				o.disableLocked()
 				return
+			}
+			if fromClient && o.current != nil {
+				o.current.endLine(state.marker == 3 && state.digits, state.length)
 			}
 			if !state.continuation && !(fromClient && o.saslTag != "") {
 				o.observeHeader(fromClient, state.tokens)
@@ -106,6 +118,9 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 				o.disableLocked()
 				return
 			}
+			if fromClient && !continued && o.saslTag == "" {
+				o.current = nil
+			}
 			*state = lineObserver{literal: literal, continuation: continued}
 			continue
 		}
@@ -118,6 +133,7 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 			state.cr = true
 			continue
 		}
+		wasHeader := !state.continuation && o.saslTag == "" && state.field < 2
 		// Suppress prefix capture for literal continuations and SASL responses.
 		if !state.continuation && !(fromClient && o.saslTag != "") && state.field < 2 {
 			if b == ' ' {
@@ -126,6 +142,12 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 					return
 				}
 				state.field++
+				if fromClient && state.field == 2 {
+					o.startAuth(state.tokens)
+					if o.disabled {
+						return
+					}
+				}
 				if !fromClient && string(state.tokens[0]) == "+" {
 					state.field = 2
 				}
@@ -140,6 +162,9 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 				}
 				state.tokens[state.field] = append(state.tokens[state.field], b)
 			}
+		}
+		if fromClient && !wasHeader && o.current != nil {
+			o.current.consume(b)
 		}
 		if (fromClient && o.saslTag != "") || (!fromClient && state.field == 2 && string(state.tokens[0]) == "+") {
 			continue
@@ -196,12 +221,34 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 	}
 }
 
+func (o *authObserver) startAuth(tokens [2][]byte) {
+	o.current = nil
+	tag := string(tokens[0])
+	verb := strings.ToUpper(string(tokens[1]))
+	if !validObservedTag(tag) {
+		return
+	}
+	if _, exists := o.pending[tag]; exists {
+		o.disableLocked()
+		return
+	}
+	if verb != "LOGIN" && verb != "AUTHENTICATE" {
+		return
+	}
+	if len(o.pending) >= maxPendingAuth {
+		o.disableLocked()
+		return
+	}
+	o.current = &authIdentity{method: verb}
+	o.pending[tag] = o.current
+}
+
 func validObservedTag(tag string) bool {
 	if tag == "" || tag == "*" || tag == "+" {
 		return false
 	}
 	for _, b := range []byte(tag) {
-		if b <= 0x20 || b >= 0x7f || strings.ContainsRune("(){}%*\\\"+]", rune(b)) {
+		if b <= 0x20 || b >= 0x7f || strings.ContainsRune("(){%*\\\"+", rune(b)) {
 			return false
 		}
 	}
@@ -219,34 +266,29 @@ func (o *authObserver) observeHeader(fromClient bool, tokens [2][]byte) {
 		return
 	}
 	if fromClient {
-		if _, exists := o.pending[tag]; exists {
-			o.disableLocked()
-			return
+		if o.current == nil && (verb == "LOGIN" || verb == "AUTHENTICATE") {
+			o.startAuth(tokens)
 		}
-		if verb != "LOGIN" && verb != "AUTHENTICATE" {
-			return
-		}
-		if len(o.pending) >= maxPendingAuth {
-			o.disableLocked()
-			return
-		}
-		o.pending[tag] = verb
 		if verb == "AUTHENTICATE" {
 			o.saslTag = tag
 		}
 		return
 	}
-	method, found := o.pending[tag]
+
+	identity, found := o.pending[tag]
 	if !found || (verb != "OK" && verb != "NO" && verb != "BAD") {
 		return
 	}
 	delete(o.pending, tag)
+	if o.current == identity {
+		o.current = nil
+	}
 	saslPartial := o.saslTag == tag && o.client.inLine
 	if o.saslTag == tag {
 		o.saslTag = ""
 	}
 
-	o.callback(authResult{Method: method, Outcome: verb})
+	o.callback(identity.result(verb))
 	if saslPartial || o.client.literal > 0 || o.client.continuation {
 		o.disableLocked()
 	}

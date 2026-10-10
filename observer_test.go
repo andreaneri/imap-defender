@@ -13,19 +13,19 @@ func TestAuthObserverFraming(t *testing.T) {
 		name, client, server string
 		want                 []authResult
 	}{
-		{"literal command injection", "A LOGIN {15+}\r\nX LOGIN a b\r\nzz {0}\r\n\r\n", "X OK fake\r\nA NO real\r\n", []authResult{{"LOGIN", "NO"}}},
-		{"multiple literals", "A LOGIN {4}\r\nuser {6+}\r\nsecret\r\nB LOGIN u p\r\n", "A NO denied\r\nB OK done\r\n", []authResult{{"LOGIN", "NO"}, {"LOGIN", "OK"}}},
-		{"binary literal", "A LOGIN ~{13+}\r\nX LOGIN\x00\r\nzzz p\r\n", "X OK fake\r\nA BAD rejected\r\n", []authResult{{"LOGIN", "BAD"}}},
-		{"server literal injection", "A LOGIN u p\r\n", "* 1 FETCH (BODY[] {13}\r\nA OK forged\r\n)\r\nA NO real\r\n", []authResult{{"LOGIN", "NO"}}},
-		{"quoted marker", "A LOGIN \"u\\\"{9}\" \"{123}\"\r\nB LOGIN u p\r\n", "A NO denied\r\nB OK done\r\n", []authResult{{"LOGIN", "NO"}, {"LOGIN", "OK"}}},
-		{"long arguments", "A LOGIN u " + strings.Repeat("s", 100000) + "\r\n", "A NO denied\r\n", []authResult{{"LOGIN", "NO"}}},
-		{"server response text quote", "A LOGIN u p\r\n", "A NO unmatched quote \"\r\n", []authResult{{"LOGIN", "NO"}}},
+		{"literal command injection", "A LOGIN {15+}\r\nX LOGIN a b\r\nzz {0}\r\n\r\n", "X OK fake\r\nA NO real\r\n", []authResult{{Method: "LOGIN", Outcome: "NO"}}},
+		{"multiple literals", "A LOGIN {4}\r\nuser {6+}\r\nsecret\r\nB LOGIN u p\r\n", "A NO denied\r\nB OK done\r\n", []authResult{{Method: "LOGIN", Outcome: "NO"}, {Method: "LOGIN", Outcome: "OK"}}},
+		{"binary literal", "A LOGIN ~{13+}\r\nX LOGIN\x00\r\nzzz p\r\n", "X OK fake\r\nA BAD rejected\r\n", []authResult{{Method: "LOGIN", Outcome: "BAD"}}},
+		{"server literal injection", "A LOGIN u p\r\n", "* 1 FETCH (BODY[] {13}\r\nA OK forged\r\n)\r\nA NO real\r\n", []authResult{{Method: "LOGIN", Outcome: "NO"}}},
+		{"quoted marker", "A LOGIN \"u\\\"{9}\" \"{123}\"\r\nB LOGIN u p\r\n", "A NO denied\r\nB OK done\r\n", []authResult{{Method: "LOGIN", Outcome: "NO"}, {Method: "LOGIN", Outcome: "OK"}}},
+		{"long arguments", "A LOGIN u " + strings.Repeat("s", 100000) + "\r\n", "A NO denied\r\n", []authResult{{Method: "LOGIN", Outcome: "NO"}}},
+		{"server response text quote", "A LOGIN u p\r\n", "A NO unmatched quote \"\r\n", []authResult{{Method: "LOGIN", Outcome: "NO"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, size := range []int{1, 2, 7, 4096} {
 				var got []authResult
-				o := newAuthObserver(func(r authResult) { got = append(got, r) })
+				o := newAuthObserver(func(r authResult) { got = append(got, withoutIdentity(r)) })
 				for _, direction := range []struct {
 					client bool
 					input  string
@@ -48,7 +48,7 @@ func TestAuthObserverFraming(t *testing.T) {
 
 func TestAuthObserverSASL(t *testing.T) {
 	var got []authResult
-	o := newAuthObserver(func(r authResult) { got = append(got, r) })
+	o := newAuthObserver(func(r authResult) { got = append(got, withoutIdentity(r)) })
 	o.observe(true, []byte("A AUTHENTICATE PLAIN initial-secret\r\n"))
 	o.observe(false, []byte("+ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\r\n"))
 	o.observe(true, []byte("X LOGIN secret password\r\n*\r\n"))
@@ -56,7 +56,7 @@ func TestAuthObserverSASL(t *testing.T) {
 	o.observe(true, []byte("B LOGIN u p\r\n"))
 	o.observe(false, []byte("B OK real\r\n"))
 	o.finish()
-	if want := []authResult{{"AUTHENTICATE", "NO"}, {"LOGIN", "OK"}}; !reflect.DeepEqual(got, want) {
+	if want := []authResult{{Method: "AUTHENTICATE", Outcome: "NO"}, {Method: "LOGIN", Outcome: "OK"}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -71,11 +71,11 @@ func TestAuthObserverIndeterminate(t *testing.T) {
 		"A LOGIN {123}\r\npartial",
 	} {
 		var got []authResult
-		o := newAuthObserver(func(r authResult) { got = append(got, r) })
+		o := newAuthObserver(func(r authResult) { got = append(got, withoutIdentity(r)) })
 		o.observe(true, []byte(input))
 		o.finish()
 		o.finish()
-		if !reflect.DeepEqual(got, []authResult{{"LOGIN", "INDETERMINATE"}}) {
+		if !reflect.DeepEqual(got, []authResult{{Method: "LOGIN", Outcome: "INDETERMINATE"}}) {
 			t.Fatalf("got %+v", got)
 		}
 	}
@@ -133,27 +133,31 @@ func (c immediateAuthReplyConn) Write(p []byte) (int, error) {
 
 func TestObserverRegistersBeforeBackendReply(t *testing.T) {
 	var got []authResult
-	o := newAuthObserver(func(r authResult) { got = append(got, r) })
+	o := newAuthObserver(func(r authResult) { got = append(got, withoutIdentity(r)) })
 	w := observingWriter{target: immediateAuthReplyConn{observer: o}, obs: o, client: true}
 	p := []byte("A LOGIN user secret\r\n")
 	if n, err := w.Write(p); n != len(p) || err != nil {
 		t.Fatalf("write: %d %v", n, err)
 	}
 	o.finish()
-	if !reflect.DeepEqual(got, []authResult{{"LOGIN", "OK"}}) {
+	if !reflect.DeepEqual(got, []authResult{{Method: "LOGIN", Outcome: "OK"}}) {
 		t.Fatalf("got %+v", got)
 	}
 }
 
 func TestAuthObserverEarlyLiteralRejection(t *testing.T) {
 	var got []authResult
-	o := newAuthObserver(func(r authResult) { got = append(got, r) })
+	o := newAuthObserver(func(r authResult) { got = append(got, withoutIdentity(r)) })
 	o.observe(true, []byte("A LOGIN {100}\r\n"))
 	o.observe(false, []byte("A NO rejected\r\n"))
 	o.observe(true, []byte("X LOGIN forged password\r\n"))
 	o.observe(false, []byte("X OK bogus\r\n"))
 	o.finish()
-	if !o.disabled || !reflect.DeepEqual(got, []authResult{{"LOGIN", "NO"}}) {
+	if !o.disabled || !reflect.DeepEqual(got, []authResult{{Method: "LOGIN", Outcome: "NO"}}) {
 		t.Fatalf("got %+v", got)
 	}
+}
+
+func withoutIdentity(r authResult) authResult {
+	return authResult{Method: r.Method, Outcome: r.Outcome}
 }
