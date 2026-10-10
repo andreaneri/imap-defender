@@ -2,7 +2,7 @@
 
 **IMAP Defender** è un prototipo di proxy IMAP in Go per sperimentare la mitigazione degli accessi automatizzati e proteggere i backend di posta. Termina TLS in ingresso e utilizza segnali come fingerprint JA4, GeoIP opzionale e Redis per valutare il rischio.
 
-> **Stato: prototipo sperimentale, non pronto per la produzione.** La Deep Inspection usa ancora un mock di autenticazione e non gestisce tutti i flussi IMAP. Non esporre il servizio a traffico reale o credenziali di utenti reali.
+> **Stato: prototipo sperimentale, non pronto per la produzione.** La Deep Inspection usa ancora un mock di autenticazione e non gestisce tutti i flussi IMAP. È stata approvata la sua rimozione a favore dell'osservazione degli esiti del backend ([ADR 0003](docs/adr/0003-backend-authentication-authority.md)), non ancora implementata. Non esporre il servizio a traffico reale o credenziali di utenti reali.
 
 ## Stato del progetto
 
