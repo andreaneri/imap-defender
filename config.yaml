@@ -4,6 +4,10 @@ server:
   cert_file: "cert.pem"
   key_file: "key.pem"
 
+# Bind to loopback unless a trusted monitoring network is configured.
+metrics:
+  listen_addr: "127.0.0.1:9090"
+
 redis:
   addr: "imap-redis:6379"
   queue_buffer_size: 10000

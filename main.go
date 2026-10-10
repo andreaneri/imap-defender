@@ -31,6 +31,11 @@ type Config struct {
 	Redis    RedisConfig    `yaml:"redis"`
 	Logging  LoggingConfig  `yaml:"logging"`
 	Security SecurityConfig `yaml:"security"`
+	Metrics MetricsConfig `yaml:"metrics"`
+}
+
+type MetricsConfig struct {
+	ListenAddr string `yaml:"listen_addr"`
 }
 
 type ServerConfig struct {
@@ -123,6 +128,10 @@ func validateConfig(c *Config) error {
 	if err := validateTCPAddress("server.backend_imap_addr", c.Server.BackendIMAPAddr, false); err != nil {
 		return err
 	}
+	if c.Metrics.ListenAddr != "" {
+		if err := validateTCPAddress("metrics.listen_addr", c.Metrics.ListenAddr, true); err != nil { return err }
+		if c.Metrics.ListenAddr == c.Server.ListenAddr { return fmt.Errorf("metrics.listen_addr must differ from server.listen_addr") }
+	}
 	if c.Redis.Addr == "" {
 		if c.Security.Mode != ModeTransparent {
 			return fmt.Errorf("redis.addr is required in learning and defender")
@@ -208,6 +217,7 @@ type RedisTracker struct {
 	queueMu    sync.RWMutex
 	closed     bool
 	closeOnce  sync.Once
+	metrics *proxyMetrics
 }
 
 func NewRedisTracker(addr string, bufferSize int) *RedisTracker {
@@ -246,6 +256,7 @@ func (rt *RedisTracker) TrackEventAsync(event authEvent) {
 	select {
 	case rt.eventQueue <- event:
 	default:
+		if rt.metrics != nil { rt.metrics.redisDropped.Add(1) }
 		slog.Warn("Coda eventi Redis piena, log rimosso", "remote_ip", event.RemoteIP)
 	}
 }
@@ -397,6 +408,7 @@ type IMAPProxy struct {
 	handshakeMap sync.Map
 	activeConns  sync.Map
 	atomicCfg    *AtomicConfig
+	metrics *proxyMetrics
 }
 
 func NewIMAPProxy(atomicCfg *AtomicConfig, tracker *RedisTracker) (*IMAPProxy, error) {
@@ -505,10 +517,12 @@ func (p *IMAPProxy) Start(ctx context.Context) error {
 		}
 		temporaryDelay = 0
 		connWG.Add(1)
+		if p.metrics != nil { p.metrics.connectionsTotal.Add(1); p.metrics.connectionsActive.Add(1) }
 		p.activeConns.Store(rawConn, struct{}{})
 		go func(conn net.Conn) {
 			defer connWG.Done()
 			defer p.activeConns.Delete(conn)
+			if p.metrics != nil { defer p.metrics.connectionsActive.Add(-1) }
 			p.handleConnection(ctx, conn)
 		}(rawConn)
 	}
@@ -580,11 +594,14 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	country := p.getCountryCode(remoteAddr)
 	ip, _, _ := net.SplitHostPort(remoteAddr)
 	action, delay := p.connectionDecision(ctx, currentCfg, ja4Fp, ip, country)
+	if p.metrics != nil { p.metrics.recordDecision(action) }
 	slog.Info("Connection risk evaluated", "remote_ip", remoteAddr, "action", action, "delay", delay)
 	if action == "DROP" {
 		return
 	}
 	if delay > 0 {
+		started := time.Now()
+		defer func() { if p.metrics != nil { p.metrics.observeTarpit(time.Since(started)) } }()
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -704,10 +721,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	metrics := &proxyMetrics{}
+	proxy.metrics = metrics
+	if tracker != nil { tracker.metrics = metrics }
 	setupSignalHandler(configFile, atomicCfg, proxy)
 	runtimeCtx, stopRuntime := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopRuntime()
 
+	if initialCfg.Metrics.ListenAddr != "" {
+		if err := startMetricsServer(runtimeCtx, initialCfg.Metrics.ListenAddr, metrics, tracker); err != nil {
+			slog.Error("Metrics listener failed", "error", err)
+			return
+		}
+	}
 	if err := proxy.Start(runtimeCtx); err != nil {
 		slog.Error("Esecuzione interrotta per errore critico", "error", err)
 		os.Exit(1)
@@ -738,7 +764,7 @@ func checkHealth(configFile string) error {
 
 // Redis and the listener are startup resources; mode changes apply to new sessions.
 func validateReload(old, next *Config) error {
-	if old.Redis != next.Redis || old.Server.ListenAddr != next.Server.ListenAddr {
+	if old.Redis != next.Redis || old.Server.ListenAddr != next.Server.ListenAddr || old.Metrics != next.Metrics {
 		return fmt.Errorf("redis settings and server.listen_addr require restart")
 	}
 	return nil
