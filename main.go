@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -68,6 +69,14 @@ type SecurityConfig struct {
 	GeoIPDBPath          string          `yaml:"geoip_db_path"`
 	Thresholds           ThresholdConfig `yaml:"thresholds"`
 	Weights              WeightConfig    `yaml:"weights"`
+	RateLimit            RateLimitConfig `yaml:"rate_limit"`
+}
+
+type RateLimitConfig struct {
+	Enabled bool `yaml:"enabled"`
+	PerMinute int `yaml:"per_minute"`
+	Burst int `yaml:"burst"`
+	ExceptCIDRs []string `yaml:"except_cidrs"`
 }
 
 type ThresholdConfig struct {
@@ -143,6 +152,14 @@ func validateConfig(c *Config) error {
 		if c.Redis.QueueBufferSize <= 0 {
 			return fmt.Errorf("redis.queue_buffer_size must be positive")
 		}
+	}
+	for _, raw := range c.Security.RateLimit.ExceptCIDRs {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil || prefix.Addr().Is4In6() || prefix != prefix.Masked() { return fmt.Errorf("security.rate_limit.except_cidrs contains invalid or non-canonical prefix %q", raw) }
+	}
+	if c.Security.RateLimit.Enabled {
+		if c.Security.Mode != ModeDefender { return fmt.Errorf("security.rate_limit requires defender mode") }
+		if c.Security.RateLimit.PerMinute <= 0 || c.Security.RateLimit.Burst <= 0 { return fmt.Errorf("security.rate_limit requires positive per_minute and burst") }
 	}
 	t := c.Security.Thresholds
 	if t.TarpitSoft <= 0 || t.TarpitSoft >= t.TarpitHard || t.TarpitHard >= t.Drop || t.Drop > 100 {
@@ -329,6 +346,19 @@ func queueAuthEvent(ctx context.Context, pipe redis.Pipeliner, event authEvent) 
 		"outcome": event.Outcome, "timestamp": event.Timestamp.Format(time.RFC3339Nano),
 	})
 	pipe.Expire(ctx, key, 7*24*time.Hour)
+	// Failure counters are derived only from authoritative backend NO/BAD
+	// outcomes with a known authcid. A successful authentication clears the
+	// corresponding per-account/per-source failure streak.
+	if event.UsernameKnown && event.Username != "" {
+		key := accountFailureKey(event.Username, event.RemoteIP)
+		switch event.Outcome {
+		case "NO", "BAD":
+			pipe.Incr(ctx, key)
+			pipe.Expire(ctx, key, 15*time.Minute)
+		case "OK":
+			pipe.Del(ctx, key)
+		}
+	}
 	if event.Outcome == "OK" && event.UsernameKnown && event.JA4 != "" {
 		pipe.Set(ctx, signalKey(event.JA4, event.RemoteIP), "1", 24*time.Hour)
 	}
@@ -409,6 +439,7 @@ type IMAPProxy struct {
 	activeConns  sync.Map
 	atomicCfg    *AtomicConfig
 	metrics *proxyMetrics
+	rateLimiter ipRateLimiter
 }
 
 func NewIMAPProxy(atomicCfg *AtomicConfig, tracker *RedisTracker) (*IMAPProxy, error) {
@@ -593,6 +624,11 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	// including its greeting and tagged authentication responses, are relayed.
 	country := p.getCountryCode(remoteAddr)
 	ip, _, _ := net.SplitHostPort(remoteAddr)
+	if currentCfg.Security.Mode == ModeDefender && currentCfg.Security.RateLimit.Enabled && !allowedSource(ip, currentCfg.Security.RateLimit.ExceptCIDRs) && !p.rateLimiter.allow(ip, currentCfg.Security.RateLimit.PerMinute, currentCfg.Security.RateLimit.Burst, time.Now()) {
+		if p.metrics != nil { p.metrics.recordDecision("DROP") }
+		slog.Warn("Connection rate limited", "remote_ip", ip)
+		return
+	}
 	action, delay := p.connectionDecision(ctx, currentCfg, ja4Fp, ip, country)
 	if p.metrics != nil { p.metrics.recordDecision(action) }
 	slog.Info("Connection risk evaluated", "remote_ip", remoteAddr, "action", action, "delay", delay)
