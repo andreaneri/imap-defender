@@ -12,7 +12,6 @@ logging:
   level: "info"
 
 security:
-  deep_inspection_mode: true
   geoip_db_path: "/geoip/GeoLite2-Country.mmdb"
   thresholds:
     tarpit_soft: 30
@@ -21,6 +20,3 @@ security:
   weights:
     ja4_unknown: 25
     geo_anomaly: 35
-    user_not_found: 50
-    password_invalid: 30
-    login_success_discount: 20
