@@ -346,6 +346,19 @@ func queueAuthEvent(ctx context.Context, pipe redis.Pipeliner, event authEvent) 
 		"outcome": event.Outcome, "timestamp": event.Timestamp.Format(time.RFC3339Nano),
 	})
 	pipe.Expire(ctx, key, 7*24*time.Hour)
+	// Failure counters are derived only from authoritative backend NO/BAD
+	// outcomes with a known authcid. A successful authentication clears the
+	// corresponding per-account/per-source failure streak.
+	if event.UsernameKnown && event.Username != "" {
+		key := accountFailureKey(event.Username, event.RemoteIP)
+		switch event.Outcome {
+		case "NO", "BAD":
+			pipe.Incr(ctx, key)
+			pipe.Expire(ctx, key, 15*time.Minute)
+		case "OK":
+			pipe.Del(ctx, key)
+		}
+	}
 	if event.Outcome == "OK" && event.UsernameKnown && event.JA4 != "" {
 		pipe.Set(ctx, signalKey(event.JA4, event.RemoteIP), "1", 24*time.Hour)
 	}
