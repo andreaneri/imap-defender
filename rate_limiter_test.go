@@ -2,6 +2,8 @@ package main
 
 import (
  "testing"
+ "fmt"
+ "sync"
  "time"
 )
 func TestIPRateLimiter(t *testing.T) {
@@ -47,4 +49,36 @@ func BenchmarkIPRateLimiter(b *testing.B) {
     now := time.Unix(1000, 0)
     b.ResetTimer()
     for i:=0; i<b.N; i++ { l.allow("192.0.2.1", 600000, 100, now) }
+}
+
+func TestRateLimiterConcurrent(t *testing.T) {
+    var l ipRateLimiter
+    now := time.Unix(100, 0)
+    var wg sync.WaitGroup
+    results := make(chan bool, 100)
+    for i:=0;i<100;i++ {
+        wg.Add(1)
+        go func() { defer wg.Done(); results <- l.allow("192.0.2.10", 60, 10, now) }()
+    }
+    wg.Wait()
+    close(results)
+    accepted:=0
+    for ok:=range results { if ok { accepted++ } }
+    if accepted != 10 { t.Fatalf("accepted %d; want 10",accepted) }
+}
+
+func BenchmarkIPRateLimiterParallel(b *testing.B) {
+    var l ipRateLimiter
+    b.RunParallel(func(pb *testing.PB) {
+        for pb.Next() { l.allow("192.0.2.1", 600000, 100, time.Now()) }
+    })
+}
+
+func BenchmarkIPRateLimiterManyIPs(b *testing.B) {
+    var l ipRateLimiter
+    ips:=make([]string, 4096)
+    for i:=range ips { ips[i]=fmt.Sprintf("198.51.%d.%d",i/256,i%256) }
+    now:=time.Unix(1000,0)
+    b.ResetTimer()
+    for i:=0;i<b.N;i++ { l.allow(ips[i%len(ips)], 600000, 100, now) }
 }
