@@ -68,6 +68,13 @@ type SecurityConfig struct {
 	GeoIPDBPath          string          `yaml:"geoip_db_path"`
 	Thresholds           ThresholdConfig `yaml:"thresholds"`
 	Weights              WeightConfig    `yaml:"weights"`
+	RateLimit            RateLimitConfig `yaml:"rate_limit"`
+}
+
+type RateLimitConfig struct {
+	Enabled bool `yaml:"enabled"`
+	PerMinute int `yaml:"per_minute"`
+	Burst int `yaml:"burst"`
 }
 
 type ThresholdConfig struct {
@@ -143,6 +150,10 @@ func validateConfig(c *Config) error {
 		if c.Redis.QueueBufferSize <= 0 {
 			return fmt.Errorf("redis.queue_buffer_size must be positive")
 		}
+	}
+	if c.Security.RateLimit.Enabled {
+		if c.Security.Mode != ModeDefender { return fmt.Errorf("security.rate_limit requires defender mode") }
+		if c.Security.RateLimit.PerMinute <= 0 || c.Security.RateLimit.Burst <= 0 { return fmt.Errorf("security.rate_limit requires positive per_minute and burst") }
 	}
 	t := c.Security.Thresholds
 	if t.TarpitSoft <= 0 || t.TarpitSoft >= t.TarpitHard || t.TarpitHard >= t.Drop || t.Drop > 100 {
@@ -409,6 +420,7 @@ type IMAPProxy struct {
 	activeConns  sync.Map
 	atomicCfg    *AtomicConfig
 	metrics *proxyMetrics
+	rateLimiter ipRateLimiter
 }
 
 func NewIMAPProxy(atomicCfg *AtomicConfig, tracker *RedisTracker) (*IMAPProxy, error) {
@@ -593,6 +605,11 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	// including its greeting and tagged authentication responses, are relayed.
 	country := p.getCountryCode(remoteAddr)
 	ip, _, _ := net.SplitHostPort(remoteAddr)
+	if currentCfg.Security.Mode == ModeDefender && currentCfg.Security.RateLimit.Enabled && !p.rateLimiter.allow(ip, currentCfg.Security.RateLimit.PerMinute, currentCfg.Security.RateLimit.Burst, time.Now()) {
+		if p.metrics != nil { p.metrics.recordDecision("DROP") }
+		slog.Warn("Connection rate limited", "remote_ip", ip)
+		return
+	}
 	action, delay := p.connectionDecision(ctx, currentCfg, ja4Fp, ip, country)
 	if p.metrics != nil { p.metrics.recordDecision(action) }
 	slog.Info("Connection risk evaluated", "remote_ip", remoteAddr, "action", action, "delay", delay)
