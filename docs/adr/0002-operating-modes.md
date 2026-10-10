@@ -17,7 +17,7 @@ Adottare tre modalità:
 
 Separare la modalità operativa dalla profondità di ispezione. Light non è sinonimo di Transparent; Deep non è sinonimo di Defender.
 
-Le fingerprint TLS non sono identità univoche. Il mock delle credenziali non può alimentare una base affidabile: l'apprendimento deve usare l'esito del backend.
+Le fingerprint TLS non sono identità univoche. Il mock delle credenziali non può alimentare una base affidabile: l'apprendimento deve usare l'esito del backend. [ADR 0003](0003-backend-authentication-authority.md) precisa che il backend è l'unica autorità di autenticazione e il proxy osserva passivamente già in Transparent.
 
 ## Conseguenze
 
