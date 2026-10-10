@@ -22,6 +22,7 @@ security:
     enabled: false
     per_minute: 60
     burst: 20
+    except_cidrs: []
   geoip_db_path: "/geoip/GeoLite2-Country.mmdb"
   thresholds:
     tarpit_soft: 30
