@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"net"
@@ -21,75 +20,236 @@ type authObserver struct {
 	callback func(authResult)
 	client   lineObserver
 	server   lineObserver
+	disabled bool
+	saslTag  string
 }
 
+// Only the tag and verb are retained. Arguments, literal bodies and SASL
+// payloads are never copied into observer-owned buffers.
 type lineObserver struct {
-	buffer   []byte
-	overflow bool
+	tokens          [2][]byte
+	field           int
+	literal         uint64
+	continuation    bool
+	quoted, escaped bool
+	marker          int
+	length          uint64
+	digits          bool
+	cr              bool
+	inLine          bool
 }
 
-const maxObservedLine = 8192
+const maxObservedTag = 128
+const maxPendingAuth = 64
 
 func newAuthObserver(callback func(authResult)) *authObserver {
 	return &authObserver{pending: make(map[string]string), callback: callback}
 }
 
-// Write always succeeds: parsing failures must never affect forwarding.
+// disableLocked stops classification when framing or correlation is ambiguous.
+// Forwarding is independent and continues unchanged.
+func (o *authObserver) disableLocked() {
+	o.disabled = true
+	o.finishLocked()
+	o.client = lineObserver{}
+	o.server = lineObserver{}
+}
+
+func (o *authObserver) finishLocked() {
+	for tag, method := range o.pending {
+		delete(o.pending, tag)
+		o.callback(authResult{Method: method, Outcome: "INDETERMINATE"})
+	}
+	o.saslTag = ""
+}
+
+func (o *authObserver) finish() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.finishLocked()
+	o.client = lineObserver{}
+	o.server = lineObserver{}
+	o.disabled = true
+}
+
 func (o *authObserver) observe(fromClient bool, chunk []byte) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.disabled {
+		return
+	}
 	state := &o.server
 	if fromClient {
 		state = &o.client
 	}
 	for _, b := range chunk {
-		if b == '\n' {
-			if !state.overflow {
-				line := bytes.TrimSuffix(state.buffer, []byte{'\r'})
-				o.observeLine(fromClient, line)
-			}
-			state.buffer = state.buffer[:0]
-			state.overflow = false
+		if state.literal > 0 {
+			state.literal--
 			continue
 		}
-		if !state.overflow {
-			if len(state.buffer) >= maxObservedLine {
-				state.buffer = state.buffer[:0]
-				state.overflow = true
-			} else {
-				state.buffer = append(state.buffer, b)
+		if b == '\n' {
+			if !state.cr || state.quoted {
+				o.disableLocked()
+				return
 			}
+			if !state.continuation && !(fromClient && o.saslTag != "") {
+				o.observeHeader(fromClient, state.tokens)
+				if o.disabled {
+					return
+				}
+			}
+			literal := uint64(0)
+			continued := false
+			if state.marker == 3 && state.digits {
+				literal, continued = state.length, true
+			} else if state.marker != 0 {
+				o.disableLocked()
+				return
+			}
+			*state = lineObserver{literal: literal, continuation: continued}
+			continue
+		}
+		if state.cr {
+			o.disableLocked()
+			return
+		}
+		state.inLine = true
+		if b == '\r' {
+			state.cr = true
+			continue
+		}
+		// Suppress prefix capture for literal continuations and SASL responses.
+		if !state.continuation && !(fromClient && o.saslTag != "") && state.field < 2 {
+			if b == ' ' {
+				if len(state.tokens[state.field]) == 0 {
+					o.disableLocked()
+					return
+				}
+				state.field++
+				if !fromClient && string(state.tokens[0]) == "+" {
+					state.field = 2
+				}
+			} else {
+				limit := maxObservedTag
+				if state.field == 1 {
+					limit = 16
+				}
+				if len(state.tokens[state.field]) >= limit {
+					o.disableLocked()
+					return
+				}
+				state.tokens[state.field] = append(state.tokens[state.field], b)
+			}
+		}
+		if (fromClient && o.saslTag != "") || (!fromClient && state.field == 2 && string(state.tokens[0]) == "+") {
+			continue
+		}
+		// Recognize a trailing literal marker outside quoted strings, without
+		// retaining the surrounding arguments. Supports {n}, {n+} and ~{n}.
+		if state.quoted {
+			if state.escaped {
+				state.escaped = false
+			} else if b == '\\' {
+				state.escaped = true
+			} else if b == '"' {
+				state.quoted = false
+			}
+			continue
+		}
+		if fromClient && b == '"' {
+			state.quoted = true
+			state.marker = 0
+			continue
+		}
+		if b == '{' {
+			state.marker = 1
+			state.length = 0
+			state.digits = false
+			continue
+		}
+		switch state.marker {
+		case 1:
+			if b >= '0' && b <= '9' {
+				digit := uint64(b - '0')
+				if state.length > (^uint64(0)-digit)/10 {
+					o.disableLocked()
+					return
+				}
+				state.length = state.length*10 + digit
+				state.digits = true
+			} else if b == '+' && state.digits {
+				state.marker = 2
+			} else if b == '}' && state.digits {
+				state.marker = 3
+			} else {
+				state.marker = 0
+			}
+		case 2:
+			if b == '}' {
+				state.marker = 3
+			} else {
+				state.marker = 0
+			}
+		case 3:
+			state.marker = 0
 		}
 	}
 }
 
-func (o *authObserver) observeLine(fromClient bool, line []byte) {
-	// Inspect only the tag and verb, never parse or retain credential arguments.
-	fields := bytes.Fields(line)
-	if len(fields) < 2 {
+func validObservedTag(tag string) bool {
+	if tag == "" || tag == "*" || tag == "+" {
+		return false
+	}
+	for _, b := range []byte(tag) {
+		if b <= 0x20 || b >= 0x7f || strings.ContainsRune("(){}%*\\\"+]", rune(b)) {
+			return false
+		}
+	}
+	return true
+}
+
+func (o *authObserver) observeHeader(fromClient bool, tokens [2][]byte) {
+	tag := string(tokens[0])
+	verb := strings.ToUpper(string(tokens[1]))
+	if !fromClient && tag == "*" && verb == "BYE" {
+		o.disableLocked()
 		return
 	}
-	tag := string(fields[0])
+	if !validObservedTag(tag) {
+		return
+	}
 	if fromClient {
-		if len(o.pending) >= 64 {
+		if _, exists := o.pending[tag]; exists {
+			o.disableLocked()
 			return
 		}
-		method := strings.ToUpper(string(fields[1]))
-		if method == "LOGIN" || method == "AUTHENTICATE" {
-			o.pending[tag] = method
+		if verb != "LOGIN" && verb != "AUTHENTICATE" {
+			return
+		}
+		if len(o.pending) >= maxPendingAuth {
+			o.disableLocked()
+			return
+		}
+		o.pending[tag] = verb
+		if verb == "AUTHENTICATE" {
+			o.saslTag = tag
 		}
 		return
 	}
 	method, found := o.pending[tag]
-	if !found {
-		return
-	}
-	status := strings.ToUpper(string(fields[1]))
-	if status != "OK" && status != "NO" && status != "BAD" {
+	if !found || (verb != "OK" && verb != "NO" && verb != "BAD") {
 		return
 	}
 	delete(o.pending, tag)
-	o.callback(authResult{Method: method, Outcome: status})
+	saslPartial := o.saslTag == tag && o.client.inLine
+	if o.saslTag == tag {
+		o.saslTag = ""
+	}
+
+	o.callback(authResult{Method: method, Outcome: verb})
+	if saslPartial || o.client.literal > 0 || o.client.continuation {
+		o.disableLocked()
+	}
 }
 
 type observingWriter struct {
@@ -99,16 +259,16 @@ type observingWriter struct {
 }
 
 func (w observingWriter) Write(p []byte) (int, error) {
-	n, err := w.target.Write(p)
-	if n > 0 {
-		w.obs.observe(w.client, p[:n])
-	}
-	return n, err
+	// Observe before publishing bytes so an immediate backend reply cannot
+	// overtake registration of its client tag. Write failures finish pending
+	// attempts as indeterminate when the relay ends.
+	w.obs.observe(w.client, p)
+	return w.target.Write(p)
 }
 
-// relayObserved forwards only bytes successfully written to the peer and
-// observes those bytes after the write. The observer cannot fail the relay.
+// relayObserved forwards bytes unchanged. The observer cannot fail the relay.
 func relayObserved(client, backend net.Conn, obs *authObserver) error {
+	defer obs.finish()
 	errs := make(chan error, 2)
 	copyOne := func(dst, src net.Conn, fromClient bool) {
 		_, err := io.Copy(observingWriter{target: dst, obs: obs, client: fromClient}, src)

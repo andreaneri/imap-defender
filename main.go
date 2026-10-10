@@ -555,7 +555,7 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	observer := newAuthObserver(func(result authResult) {
 		// Do not persist or log credentials. Learning-mode persistence is a
 		// separate change; an observed success must not grant global JA4 trust.
-		slog.Info("Backend IMAP authentication result",
+		slog.Info("IMAP authentication observation",
 			"remote_ip", remoteAddr, "ja4", ja4Fp,
 			"method", result.Method, "outcome", result.Outcome)
 	})

@@ -69,8 +69,8 @@ func TestObservedRelayPreservesBytes(t *testing.T) {
 		}))
 	}()
 	backendScript := "* OK Dovecot ready\r\n"
-	request := "A1 CAPABILITY\r\nA2 LOGIN \"alice\" \"secret with spaces\"\r\n"
-	response := "* CAPABILITY IMAP4rev1\r\nA1 OK done\r\nA2 NO invalid password\r\n"
+	request := "A1 CAPABILITY\r\nA2 LOGIN ~{13+}\r\nX LOGIN\x00\r\nzzz \"secret with spaces\"\r\n"
+	response := "* CAPABILITY IMAP4rev1\r\nA1 OK done\r\n* 1 FETCH (BODY[] {13}\r\nA2 OK bogus\r\n)\r\nA2 NO invalid password\r\n"
 	go func() {
 		defer backend.Close()
 		_, _ = io.WriteString(backend, backendScript)
