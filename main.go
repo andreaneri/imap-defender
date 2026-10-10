@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -47,10 +49,20 @@ type LoggingConfig struct {
 	Level string `yaml:"level"`
 }
 
+type OperatingMode string
+
+const (
+	ModeTransparent OperatingMode = "transparent"
+	ModeLearning    OperatingMode = "learning"
+	ModeDefender    OperatingMode = "defender"
+)
+
 type SecurityConfig struct {
-	GeoIPDBPath        string          `yaml:"geoip_db_path"`
-	Thresholds         ThresholdConfig `yaml:"thresholds"`
-	Weights            WeightConfig    `yaml:"weights"`
+	Mode                 OperatingMode   `yaml:"mode"`
+	LegacyDeepInspection *bool           `yaml:"deep_inspection_mode"`
+	GeoIPDBPath          string          `yaml:"geoip_db_path"`
+	Thresholds           ThresholdConfig `yaml:"thresholds"`
+	Weights              WeightConfig    `yaml:"weights"`
 }
 
 type ThresholdConfig struct {
@@ -60,8 +72,8 @@ type ThresholdConfig struct {
 }
 
 type WeightConfig struct {
-	JA4Unknown           int `yaml:"ja4_unknown"`
-	GeoAnomaly           int `yaml:"geo_anomaly"`
+	JA4Unknown int `yaml:"ja4_unknown"`
+	GeoAnomaly int `yaml:"geo_anomaly"`
 }
 
 type AtomicConfig struct {
@@ -87,6 +99,18 @@ func LoadConfig(filename string) (*Config, error) {
 }
 
 func validateConfig(c *Config) error {
+	if c.Security.LegacyDeepInspection != nil {
+		return fmt.Errorf("security.deep_inspection_mode is retired; set security.mode explicitly")
+	}
+	if c.Security.Mode == "" {
+		c.Security.Mode = ModeTransparent
+	}
+	switch c.Security.Mode {
+	case ModeTransparent, ModeLearning, ModeDefender:
+	default:
+		return fmt.Errorf("invalid security.mode: %q", c.Security.Mode)
+	}
+
 	if c.Server.ListenAddr == "" || c.Server.BackendIMAPAddr == "" {
 		return fmt.Errorf("server.listen_addr e server.backend_imap_addr sono obbligatori")
 	}
@@ -100,13 +124,16 @@ func validateConfig(c *Config) error {
 		return err
 	}
 	if c.Redis.Addr == "" {
-		return fmt.Errorf("redis.addr è obbligatorio")
-	}
-	if err := validateTCPAddress("redis.addr", c.Redis.Addr, false); err != nil {
-		return err
-	}
-	if c.Redis.QueueBufferSize <= 0 {
-		return fmt.Errorf("redis.queue_buffer_size deve essere maggiore di zero")
+		if c.Security.Mode != ModeTransparent {
+			return fmt.Errorf("redis.addr is required in learning and defender")
+		}
+	} else {
+		if err := validateTCPAddress("redis.addr", c.Redis.Addr, false); err != nil {
+			return err
+		}
+		if c.Redis.QueueBufferSize <= 0 {
+			return fmt.Errorf("redis.queue_buffer_size must be positive")
+		}
 	}
 	t := c.Security.Thresholds
 	if t.TarpitSoft <= 0 || t.TarpitSoft >= t.TarpitHard || t.TarpitHard >= t.Drop || t.Drop > 100 {
@@ -164,25 +191,17 @@ func initLogger(levelStr string) {
 
 // --- MODULO 2: DATI & STRUTTURE COMPONENTI ---
 
-type LoginEvent struct {
-	JA4       string
-	Username  string
-	RemoteIP  string
-	Success   bool
-	Timestamp time.Time
-}
-
 type ClientContext struct {
-	JA4Known      bool
-	CountryCode   string
-	RemoteIP      string
+	JA4Known    bool
+	CountryCode string
+	RemoteIP    string
 }
 
 // --- MODULO 3: ASYNC REDIS TRACKER ---
 
 type RedisTracker struct {
 	client     *redis.Client
-	eventQueue chan LoginEvent
+	eventQueue chan authEvent
 	ctx        context.Context
 	cancel     context.CancelFunc
 	workerDone chan struct{}
@@ -192,11 +211,11 @@ type RedisTracker struct {
 }
 
 func NewRedisTracker(addr string, bufferSize int) *RedisTracker {
-	rdb := redis.NewClient(&redis.Options{Addr: addr})
+	rdb := redis.NewClient(&redis.Options{Addr: addr, MaxRetries: -1, DialTimeout: 200 * time.Millisecond, ReadTimeout: 200 * time.Millisecond, WriteTimeout: 200 * time.Millisecond, ContextTimeoutEnabled: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	tracker := &RedisTracker{
 		client:     rdb,
-		eventQueue: make(chan LoginEvent, bufferSize),
+		eventQueue: make(chan authEvent, bufferSize),
 		ctx:        ctx,
 		cancel:     cancel,
 		workerDone: make(chan struct{}),
@@ -205,20 +224,20 @@ func NewRedisTracker(addr string, bufferSize int) *RedisTracker {
 	return tracker
 }
 
-func (rt *RedisTracker) IsJA4Trusted(ja4 string) bool {
-	key := "proxy:ja4:trusted:" + ja4
-	ctx, cancel := context.WithTimeout(rt.ctx, 200*time.Millisecond)
-	defer cancel()
-
-	exists, err := rt.client.Exists(ctx, key).Result()
-	if err != nil {
-		slog.Error("Redis lookup fallito", "ja4", ja4, "error", err)
-		return false
-	}
-	return exists > 0
+// A positive backend outcome is a scoped historical signal, never a whitelist.
+func signalKey(ja4, ip string) string {
+	data, _ := json.Marshal([]string{ja4, ip})
+	return fmt.Sprintf("proxy:auth:success:%x", sha256.Sum256(data))
 }
 
-func (rt *RedisTracker) TrackEventAsync(event LoginEvent) {
+func (rt *RedisTracker) HasSuccessfulOrigin(ctx context.Context, ja4, ip string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	exists, err := rt.client.Exists(ctx, signalKey(ja4, ip)).Result()
+	return exists > 0, err
+}
+
+func (rt *RedisTracker) TrackEventAsync(event authEvent) {
 	rt.queueMu.RLock()
 	defer rt.queueMu.RUnlock()
 	if rt.closed {
@@ -235,7 +254,7 @@ func (rt *RedisTracker) startAsyncWorker() {
 	defer close(rt.workerDone)
 	slog.Info("Redis worker asincrono avviato")
 	for {
-		var event LoginEvent
+		var event authEvent
 		select {
 		case <-rt.ctx.Done():
 			return
@@ -247,21 +266,9 @@ func (rt *RedisTracker) startAsyncWorker() {
 		}
 
 		ctx, cancel := context.WithTimeout(rt.ctx, 2*time.Second)
-		pipe := rt.client.Pipeline()
+		pipe := rt.client.TxPipeline()
 
-		if event.Success {
-			trustedKey := "proxy:ja4:trusted:" + event.JA4
-			pipe.Set(ctx, trustedKey, "1", 30*24*time.Hour)
-		}
-
-		analyticsKey := "proxy:analytics:ja4:" + event.JA4 + ":user:" + event.Username
-		fields := map[string]interface{}{
-			"ip":        event.RemoteIP,
-			"esito":     map[bool]string{true: "OK", false: "KO"}[event.Success],
-			"timestamp": event.Timestamp.Format(time.RFC3339),
-		}
-		pipe.HSet(ctx, analyticsKey, fields)
-		pipe.Expire(ctx, analyticsKey, 7*24*time.Hour)
+		queueAuthEvent(ctx, pipe, event)
 
 		_, err := pipe.Exec(ctx)
 		cancel()
@@ -295,6 +302,51 @@ func (rt *RedisTracker) Close() {
 	})
 }
 
+// Last observation per known identity/origin/method; unknown identities are
+// individual observations and are never grouped into a shared account.
+func queueAuthEvent(ctx context.Context, pipe redis.Pipeliner, event authEvent) {
+	identity := []string{event.JA4, event.RemoteIP, event.CountryCode, event.Username, event.AuthorizationID, event.Method, event.Mechanism}
+	if !event.UsernameKnown {
+		identity = append(identity, event.Timestamp.Format(time.RFC3339Nano))
+	}
+	data, _ := json.Marshal(identity)
+	key := fmt.Sprintf("proxy:auth:observation:%x", sha256.Sum256(data))
+	pipe.HSet(ctx, key, map[string]interface{}{
+		"ip": event.RemoteIP, "country_code": event.CountryCode, "ja4": event.JA4,
+		"username_known": strconv.FormatBool(event.UsernameKnown), "username": event.Username,
+		"authorization_id": event.AuthorizationID, "method": event.Method, "mechanism": event.Mechanism,
+		"outcome": event.Outcome, "timestamp": event.Timestamp.Format(time.RFC3339Nano),
+	})
+	pipe.Expire(ctx, key, 7*24*time.Hour)
+	if event.Outcome == "OK" && event.UsernameKnown && event.JA4 != "" {
+		pipe.Set(ctx, signalKey(event.JA4, event.RemoteIP), "1", 24*time.Hour)
+	}
+}
+
+// Non-defensive modes do not even read Redis. On lookup failure Defender
+// explicitly fails open for this connection rather than inventing a risk signal.
+func (p *IMAPProxy) connectionDecision(ctx context.Context, cfg *Config, ja4, ip, country string) (string, time.Duration) {
+	if cfg.Security.Mode != ModeDefender {
+		return "ALLOW", 0
+	}
+	if p.tracker == nil {
+		return "ALLOW", 0
+	}
+	known, err := p.tracker.HasSuccessfulOrigin(ctx, ja4, ip)
+	if err != nil {
+		slog.Warn("Risk lookup unavailable; allowing connection", "error", err)
+		return "ALLOW", 0
+	}
+	return EvaluateRisk(&ClientContext{JA4Known: known, CountryCode: country, RemoteIP: ip}, cfg.Security)
+}
+
+func (p *IMAPProxy) recordAuthEvent(mode OperatingMode, event authEvent) {
+	logAuthEvent(slog.Default(), event)
+	if mode != ModeTransparent && p.tracker != nil {
+		p.tracker.TrackEventAsync(event)
+	}
+}
+
 // --- MODULO 4: RISK ENGINE ---
 
 func EvaluateRisk(ctx *ClientContext, secCfg SecurityConfig) (action string, delay time.Duration) {
@@ -308,7 +360,6 @@ func EvaluateRisk(ctx *ClientContext, secCfg SecurityConfig) (action string, del
 	if ctx.CountryCode != "IT" && ctx.CountryCode != "ZZ" {
 		score += secCfg.Weights.GeoAnomaly
 	}
-
 
 	if score < 0 {
 		score = 0
@@ -511,7 +562,7 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	p.mu.RUnlock()
 	defer tlsConn.Close()
 
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		slog.Debug("Handshake TLS fallito", "remote_ip", remoteAddr, "error", err)
 		return
 	}
@@ -524,13 +575,11 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 
 	slog.Debug("Handshake TLS completato", "remote_ip", remoteAddr, "ja4", ja4Fp)
 
-
 	// The backend is the sole authentication authority. All IMAP bytes,
 	// including its greeting and tagged authentication responses, are relayed.
 	country := p.getCountryCode(remoteAddr)
-	ja4Known := p.tracker.IsJA4Trusted(ja4Fp)
-	clientCtx := &ClientContext{JA4Known: ja4Known, CountryCode: country, RemoteIP: remoteAddr}
-	action, delay := EvaluateRisk(clientCtx, currentCfg.Security)
+	ip, _, _ := net.SplitHostPort(remoteAddr)
+	action, delay := p.connectionDecision(ctx, currentCfg, ja4Fp, ip, country)
 	slog.Info("Connection risk evaluated", "remote_ip", remoteAddr, "action", action, "delay", delay)
 	if action == "DROP" {
 		return
@@ -553,9 +602,7 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	defer backendConn.Close()
 
 	observer := newAuthObserver(func(result authResult) {
-		// Learning persistence and enforcement are separate changes. A successful
-		// attempt does not grant unconditional trust to the account or fingerprint.
-		logAuthEvent(slog.Default(), newAuthEvent(result, remoteAddr, country, ja4Fp))
+		p.recordAuthEvent(currentCfg.Security.Mode, newAuthEvent(result, remoteAddr, country, ja4Fp))
 	})
 	if err := relayObserved(tlsConn, backendConn, observer); err != nil {
 		slog.Debug("IMAP relay finished", "remote_ip", remoteAddr, "error", err)
@@ -579,6 +626,10 @@ func setupSignalHandler(configFile string, atomicCfg *AtomicConfig, proxy *IMAPP
 				continue
 			}
 
+			if err := validateReload(atomicCfg.Load(), newCfg); err != nil {
+				slog.Error("Hot reload rejected", "error", err)
+				continue
+			}
 			cert, err := tls.LoadX509KeyPair(newCfg.Server.CertFile, newCfg.Server.KeyFile)
 			if err != nil {
 				slog.Error("Hot reload fallito: impossibile caricare i nuovi certificati", "error", err)
@@ -598,7 +649,9 @@ func setupSignalHandler(configFile string, atomicCfg *AtomicConfig, proxy *IMAPP
 			}
 
 			proxy.mu.Lock()
-			proxy.tlsConfig.Certificates = []tls.Certificate{cert}
+			newTLSConfig := proxy.tlsConfig.Clone()
+			newTLSConfig.Certificates = []tls.Certificate{cert}
+			proxy.tlsConfig = newTLSConfig
 			oldGeoDB := proxy.geoDB
 			proxy.geoDB = newGeoDB
 			proxy.mu.Unlock()
@@ -639,8 +692,11 @@ func main() {
 	atomicCfg := &AtomicConfig{}
 	atomicCfg.Store(initialCfg)
 
-	tracker := NewRedisTracker(initialCfg.Redis.Addr, initialCfg.Redis.QueueBufferSize)
-	defer tracker.Close()
+	var tracker *RedisTracker
+	if initialCfg.Redis.Addr != "" {
+		tracker = NewRedisTracker(initialCfg.Redis.Addr, initialCfg.Redis.QueueBufferSize)
+		defer tracker.Close()
+	}
 
 	proxy, err := NewIMAPProxy(atomicCfg, tracker)
 	if err != nil {
@@ -678,4 +734,12 @@ func checkHealth(configFile string) error {
 		return fmt.Errorf("proxy non in ascolto: %w", err)
 	}
 	return conn.Close()
+}
+
+// Redis and the listener are startup resources; mode changes apply to new sessions.
+func validateReload(old, next *Config) error {
+	if old.Redis != next.Redis || old.Server.ListenAddr != next.Server.ListenAddr {
+		return fmt.Errorf("redis settings and server.listen_addr require restart")
+	}
+	return nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"log/slog"
 	"net"
 	"testing"
 	"time"
@@ -11,11 +12,11 @@ import (
 func TestEvaluateRisk(t *testing.T) {
 	cfg := SecurityConfig{
 		Thresholds: ThresholdConfig{TarpitSoft: 30, TarpitHard: 60, Drop: 90},
-		Weights: WeightConfig{JA4Unknown: 25, GeoAnomaly: 35},
+		Weights:    WeightConfig{JA4Unknown: 25, GeoAnomaly: 35},
 	}
 	cases := []struct {
 		name string
-		ctx ClientContext
+		ctx  ClientContext
 		want string
 	}{
 		{"known domestic", ClientContext{JA4Known: true, CountryCode: "IT"}, "ALLOW"},
@@ -86,28 +87,47 @@ func TestObservedRelayPreservesBytes(t *testing.T) {
 	}()
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 	greeting := make([]byte, len(backendScript))
-	if _, err := io.ReadFull(client, greeting); err != nil { t.Fatal(err) }
-	if string(greeting) != backendScript { t.Fatalf("greeting changed: %q", greeting) }
-	if _, err := io.WriteString(client, request); err != nil { t.Fatal(err) }
+	if _, err := io.ReadFull(client, greeting); err != nil {
+		t.Fatal(err)
+	}
+	if string(greeting) != backendScript {
+		t.Fatalf("greeting changed: %q", greeting)
+	}
+	if _, err := io.WriteString(client, request); err != nil {
+		t.Fatal(err)
+	}
 	reply := make([]byte, len(response))
-	if _, err := io.ReadFull(client, reply); err != nil { t.Fatal(err) }
-	if !bytes.Equal(reply, []byte(response)) { t.Fatalf("response changed: %q", reply) }
+	if _, err := io.ReadFull(client, reply); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(reply, []byte(response)) {
+		t.Fatalf("response changed: %q", reply)
+	}
 	client.Close()
 	select {
 	case result := <-results:
-		if result.Method != "LOGIN" || result.Outcome != "NO" { t.Fatalf("unexpected result: %+v", result) }
-	case <-time.After(3 * time.Second): t.Fatal("missing authentication result")
+		if result.Method != "LOGIN" || result.Outcome != "NO" {
+			t.Fatalf("unexpected result: %+v", result)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("missing authentication result")
 	}
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second): t.Fatal("relay did not stop")
+	case <-time.After(3 * time.Second):
+		t.Fatal("relay did not stop")
 	}
 }
 
 func BenchmarkEvaluateRisk(b *testing.B) {
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})))
+	b.Cleanup(func() { slog.SetDefault(previous) })
 	cfg := SecurityConfig{Thresholds: ThresholdConfig{TarpitSoft: 30, TarpitHard: 60, Drop: 90}, Weights: WeightConfig{JA4Unknown: 25, GeoAnomaly: 35}}
 	ctx := ClientContext{JA4Known: false, CountryCode: "US"}
-	for i := 0; i < b.N; i++ { _, _ = EvaluateRisk(&ctx, cfg) }
+	for i := 0; i < b.N; i++ {
+		_, _ = EvaluateRisk(&ctx, cfg)
+	}
 }
 
 func BenchmarkAuthObserver(b *testing.B) {
