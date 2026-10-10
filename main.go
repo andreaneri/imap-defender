@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -75,6 +76,7 @@ type RateLimitConfig struct {
 	Enabled bool `yaml:"enabled"`
 	PerMinute int `yaml:"per_minute"`
 	Burst int `yaml:"burst"`
+	ExceptCIDRs []string `yaml:"except_cidrs"`
 }
 
 type ThresholdConfig struct {
@@ -150,6 +152,10 @@ func validateConfig(c *Config) error {
 		if c.Redis.QueueBufferSize <= 0 {
 			return fmt.Errorf("redis.queue_buffer_size must be positive")
 		}
+	}
+	for _, raw := range c.Security.RateLimit.ExceptCIDRs {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil || prefix.Addr().Is4In6() || prefix != prefix.Masked() { return fmt.Errorf("security.rate_limit.except_cidrs contains invalid or non-canonical prefix %q", raw) }
 	}
 	if c.Security.RateLimit.Enabled {
 		if c.Security.Mode != ModeDefender { return fmt.Errorf("security.rate_limit requires defender mode") }
@@ -605,7 +611,7 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	// including its greeting and tagged authentication responses, are relayed.
 	country := p.getCountryCode(remoteAddr)
 	ip, _, _ := net.SplitHostPort(remoteAddr)
-	if currentCfg.Security.Mode == ModeDefender && currentCfg.Security.RateLimit.Enabled && !p.rateLimiter.allow(ip, currentCfg.Security.RateLimit.PerMinute, currentCfg.Security.RateLimit.Burst, time.Now()) {
+	if currentCfg.Security.Mode == ModeDefender && currentCfg.Security.RateLimit.Enabled && !allowedSource(ip, currentCfg.Security.RateLimit.ExceptCIDRs) && !p.rateLimiter.allow(ip, currentCfg.Security.RateLimit.PerMinute, currentCfg.Security.RateLimit.Burst, time.Now()) {
 		if p.metrics != nil { p.metrics.recordDecision("DROP") }
 		slog.Warn("Connection rate limited", "remote_ip", ip)
 		return
