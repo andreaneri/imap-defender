@@ -565,33 +565,6 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	}
 }
 
-func relayBidirectional(client, backend net.Conn, clientToBackend io.Reader) error {
-	copyErrors := make(chan error, 2)
-	copyStream := func(destination, source net.Conn) {
-		_, err := io.Copy(destination, source)
-		if closeWriter, ok := destination.(interface{ CloseWrite() error }); ok {
-			_ = closeWriter.CloseWrite()
-		}
-		copyErrors <- err
-	}
-
-	go func() {
-		_, err := io.Copy(backend, clientToBackend)
-		if closeWriter, ok := backend.(interface{ CloseWrite() error }); ok {
-			_ = closeWriter.CloseWrite()
-		}
-		copyErrors <- err
-	}()
-	go copyStream(client, backend)
-	firstErr := <-copyErrors
-	if firstErr != nil {
-		_ = client.Close()
-		_ = backend.Close()
-	}
-	secondErr := <-copyErrors
-	return errors.Join(firstErr, secondErr)
-}
-
 // --- MODULO 7: SIGNAL LISTENER (HOT RELOAD POSIX) ---
 
 func setupSignalHandler(configFile string, atomicCfg *AtomicConfig, proxy *IMAPProxy) {
