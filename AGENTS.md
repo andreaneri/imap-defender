@@ -19,7 +19,7 @@ Proteggere il backend IMAP da attacchi automatizzati mantenendo la compatibilit�
 - **Learning**: osserva traffico ed esiti reali delle autenticazioni e popola Redis, senza applicare contromisure basate sulle classificazioni.
 - **Defender**: usa i segnali raccolti per applicare rate limiting, rallentamento, blocco ed eccezioni configurabili, con decisioni motivabili.
 
-Queste tre modalità sono il progetto concordato, ancora da implementare. Il parametro attuale `security.deep_inspection_mode` seleziona Light o Deep Inspection: non rappresenta le tre modalità operative. Vedere [ADR 0002](docs/adr/0002-operating-modes.md).
+La selezione `security.mode`, Transparent, Learning e il gating del Risk Engine in Defender sono implementati. Rate limiting ed eccezioni Defender restano da implementare. Il campo obsoleto `security.deep_inspection_mode` viene rifiutato: vedere [ADR 0005](docs/adr/0005-mode-runtime-and-learning.md) per migrazione, default, Redis e reload.
 
 ## Principi tecnici
 

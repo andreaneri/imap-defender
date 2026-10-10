@@ -2,7 +2,7 @@
 
 - Data: 2026-10-09
 - Stato: Accettato
-- Implementazione: pendente; questo ADR non modifica il runtime
+- Implementazione: selezione e gating implementati; rate limiting ed eccezioni Defender pendenti, vedere [ADR 0005](0005-mode-runtime-and-learning.md)
 
 ## Contesto
 

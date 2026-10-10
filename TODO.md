@@ -19,11 +19,11 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
 - [x] **Eliminazione della verifica locale delle credenziali** ([ADR 0003](docs/adr/0003-backend-authentication-authority.md)):
   - Rimuovere `verifyCredentialsTBD`, risposte di autenticazione sintetiche, replay LOGIN ricostruito e pesi di rischio basati su verifica locale.
   - Rimuovere l'ipotesi di connettori LDAP/AD e pre-screening account: l'autenticazione appartiene al backend IMAP.
-- [ ] **Osservatore bidirezionale delle autenticazioni**:
+- [x] **Osservatore bidirezionale delle autenticazioni**:
   - [x] Inoltrare byte invariati, incluso greeting, comandi preliminari e risposte tagged, osservando LOGIN/AUTHENTICATE e relativi esiti reali per sessione/tag (implementazione iniziale).
   - [x] Rafforzare il parser per literal e payload multilinea, esiti indeterminati, limiti di memoria e casi avversari; verificare che password, token e payload completi non siano registrati o persistiti.
   - [x] Estrarre la username per LOGIN (atom/quoted/literal), SASL PLAIN e SASL LOGIN; distinguere identità sconosciute e authzid, associando timestamp/IP/GeoIP/JA4 ed esito reale in un evento strutturato.
-  - In Transparent osservare senza enforcement o persistenza obbligatoria; in Learning alimentare Redis con eventi reali, in Defender usare i segnali secondo politica.
+  - [x] In Transparent osservare senza enforcement o persistenza; in Learning alimentare Redis con eventi reali; in Defender applicare il Risk Engine preesistente e apprendere secondo [ADR 0005](docs/adr/0005-mode-runtime-and-learning.md).
 - [ ] **Test end-to-end con backend Dovecot**:
   - Configurare account di test e verificare OK/NO del backend, comandi preliminari, più autenticazioni e disconnessioni, senza alterare il flusso.
 
@@ -54,7 +54,7 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
 - [x] **Parsing passivo IMAP robusto**:
   - Rendere l'osservatore consapevole di literal e flussi SASL, evitando falsi positivi su dati arbitrari, senza mai alterare il relay.
 - [x] **Propagazione dell'esito del backend**:
-  - Il relay inoltra la risposta tagged originale e l'osservatore rileva OK/NO/BAD per LOGIN/AUTHENTICATE; la persistenza in Learning resta da implementare.
+  - Il relay inoltra la risposta tagged originale e l'osservatore rileva OK/NO/BAD per LOGIN/AUTHENTICATE; la persistenza in Learning è implementata.
 - [x] **Preservazione dell'input quando LOGIN non è il primo comando**:
   - Il relay inoltra tutti i byte ricevuti indipendentemente dalla presenza di LOGIN.
 
@@ -110,6 +110,8 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
   - Procedere per piccoli commit senza cambiamenti funzionali, spostando e adattando i test insieme al codice; verificare `make test`, `make build-local`, `make build-linux` e `go vet ./...`.
   - Pianificare la sequenza rispetto alle correzioni del protocollo IMAP e all'implementazione delle modalità operative, evitando di mescolare refactoring e nuove funzionalità nella stessa PR.
 - [ ] **Implementazione delle modalità operative** ([ADR 0002](docs/adr/0002-operating-modes.md)):
-  - Definire compatibilità e migrazione della configurazione da `deep_inspection_mode`, valori predefiniti e comportamento in caso di Redis indisponibile.
-  - Implementare Transparent senza mitigazioni deliberate, Learning con osservazione degli esiti reali e apprendimento Redis, Defender con enforcement configurabile.
-  - Aggiungere test di protocollo, concorrenza, timeout e comportamento per ciascuna modalità.
+  - [x] Definire migrazione da `deep_inspection_mode`, default Transparent e fail-open su Redis indisponibile (ADR 0005).
+  - [x] Implementare Transparent senza mitigazioni e Learning con eventi reali e TTL Redis; selezionare solo in Defender tarpit/DROP del Risk Engine.
+  - [ ] Completare Defender con rate limiting ed eccezioni configurabili; definire politiche per account e contatori, senza whitelist globale JA4.
+  - [x] Aggiungere test di relay TLS, concorrenza della coda, timeout/cancellazione Redis e comportamento per modalità con backend e peer RESP controllati.
+  - [ ] Collaudare le modalità con Redis e Dovecot reali.

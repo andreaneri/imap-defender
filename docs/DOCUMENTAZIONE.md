@@ -4,6 +4,10 @@
 >
 > Per la fotografia del comportamento implementato, i limiti e le modalità concordate consultare [architecture.md](architecture.md). Questa guida contiene anche descrizioni progettuali: verificarle rispetto al codice corrente. Le decisioni condivise sono negli [ADR](adr/README.md).
 
+## Modalità operative implementate
+
+`security.mode: transparent` è il default: inoltro e osservazione senza accessi Redis o mitigazioni. `learning` accoda eventi di autenticazione reali; `defender` aggiunge il Risk Engine prima del relay. Redis è opzionale solo in Transparent. Migrare esplicitamente i vecchi YAML: `deep_inspection_mode` è rifiutato e le vecchie whitelist JA4 non sono lette. Lo schema attuale conserva osservazioni per 7 giorni e successi JA4/IP per 24 ore, senza concedere whitelist globale. Lookup Defender con timeout 200 ms e fail-open; scritture asincrone transazionali con TTL, non durevoli. La modalità è fissata per sessione; Redis e listener richiedono restart per cambiare configurazione. [ADR 0005](adr/0005-mode-runtime-and-learning.md) dettaglia la politica attuale. Le sezioni storiche sottostanti su whitelist, Deep Inspection e mitigazioni post-LOGIN non descrivono questo runtime.
+
 ## Indice dei Contenuti
 1. [Visione Generale dell'Architettura](#1-visione-generale-dellarchitettura)
 2. [Ciclo di Vita della Connessione e Fingerprinting TLS (JA4+)](#2-ciclo-di-vita-della-connessione-e-fingerprinting-tls-ja4)
