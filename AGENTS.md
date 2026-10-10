@@ -26,7 +26,7 @@ Queste tre modalità sono il progetto concordato, ancora da implementare. Il par
 - Preferire Go e la libreria standard; limitare dipendenze e framework non necessari.
 - Separare le responsabilità di proxying, osservazione, classificazione ed enforcement senza introdurre rifattorizzazioni non richieste.
 - Trattare fingerprint TLS, IP, paese, account ed esito come segnali distinti. Una fingerprint TLS non identifica univocamente un client e un successo non giustifica una whitelist globale incondizionata.
-- Osservare l'esito reale del backend; il mock attuale non è prova di autenticazione.
+- Il backend IMAP è l'unica autorità per l'autenticazione: nessuna verifica locale di credenziali, nessun connettore LDAP/AD di pre-screening e nessuna risposta LOGIN sintetica nel comportamento obiettivo. Osservare l'esito reale del backend senza modificare i byte ([ADR 0003](docs/adr/0003-backend-authentication-authority.md)); il mock attuale non è prova di autenticazione.
 - Non registrare password, token, chiavi private o comandi contenenti credenziali. Ridurre i dati personali raccolti e documentare TTL e finalità.
 - Preservare greeting, tag, capability, comandi, risposte e byte già letti nel buffer; quando appropriato, il relay deve usare il `bufio.Reader` esistente.
 - Gestire timeout, connessioni, goroutine e cancellazione dei context; chiudere le risorse e attendere le copie del relay.
