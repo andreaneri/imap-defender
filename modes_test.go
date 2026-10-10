@@ -97,7 +97,9 @@ func TestAuthPersistenceFieldsAndTTL(t *testing.T) {
 		}
 		want := 2
 		if outcome == "OK" {
-			want = 3
+			want = 4 // observation, TTL, counter deletion, success signal
+		} else if outcome == "NO" || outcome == "BAD" {
+			want = 4 // observation, TTL, increment, counter TTL
 		}
 		if len(cmds) != want {
 			t.Fatalf("outcome %s created success signal", outcome)
