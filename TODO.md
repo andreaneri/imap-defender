@@ -15,15 +15,16 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
 
 ---
 
-## 2. Autenticazione e Integrazione Backend Reale
-- [ ] **Sostituzione mock `verifyCredentialsTBD`**:
-  - Implementare l'interfaccia e il connettore verso un backend di autenticazione reale:
-    - [ ] Connettore **LDAP / Active Directory** (`github.com/go-ldap/ldap/v3`) con query utente e bind password.
-    - [ ] *Opzionale*: Connettore database SQL o cache/socket PAM/Dovecot auth.
-- [ ] **Pre-screening esistenza utenza (Anti-Scanning)**:
-  - Disaccoppiare la verifica dell'esistenza dell'account dalla verifica della password per preservare la CPU del backend durante attacchi a dizionario.
-- [ ] **Configurazione account di test nel container Dovecot**:
-  - Configurare un file di autenticazione fittizio (es. `users.passwd`) nel servizio `imap-backend` di `docker-compose.yaml` per consentire il collaudo end-to-end con esito `OK` inoltrato a Dovecot.
+## 2. Autenticazione e osservazione degli esiti reali
+- [ ] **Eliminazione della verifica locale delle credenziali** ([ADR 0003](docs/adr/0003-backend-authentication-authority.md)):
+  - Rimuovere `verifyCredentialsTBD`, risposte di autenticazione sintetiche, replay LOGIN ricostruito e pesi di rischio basati su verifica locale.
+  - Rimuovere l'ipotesi di connettori LDAP/AD e pre-screening account: l'autenticazione appartiene al backend IMAP.
+- [ ] **Osservatore bidirezionale delle autenticazioni**:
+  - Inoltrare byte invariati, incluso greeting, comandi preliminari e risposte tagged, osservando LOGIN e relativi esiti reali per sessione/tag.
+  - Non conservare password né dati SASL sensibili; distinguere esiti indeterminati e coprire quoted strings, literal e AUTHENTICATE nei test.
+  - In Transparent osservare senza enforcement o persistenza obbligatoria; in Learning alimentare Redis con eventi reali, in Defender usare i segnali secondo politica.
+- [ ] **Test end-to-end con backend Dovecot**:
+  - Configurare account di test e verificare OK/NO del backend, comandi preliminari, più autenticazioni e disconnessioni, senza alterare il flusso.
 
 ---
 

@@ -35,6 +35,10 @@ Gli eventi contengono JA4, username, indirizzo remoto, esito e timestamp. Il val
 
 Il prototipo richiede questi interventi prima dell'uso in produzione.
 
+## Decisione successiva: autenticazione del backend
+
+[ADR 0003](adr/0003-backend-authentication-authority.md) stabilisce che il backend IMAP è l'unica autorità per l'autenticazione. Il proxy dovrà osservare passivamente richieste e risposte tagged già in Transparent, senza verificare credenziali o generare risposte sintetiche. Learning persisterà gli esiti reali in Redis; Defender li userà secondo politica. **Questa decisione non è ancora implementata**: la tabella iniziale descrive ancora il codice attuale.
+
 ## Architettura concordata
 
 Le responsabilità da mantenere distinte sono:
@@ -58,5 +62,6 @@ Le normali chiusure per errori di rete o protocollo restano distinte dalle contr
 
 - [ADR 0001](adr/0001-shared-repository-context.md): GitHub come fonte condivisa.
 - [ADR 0002](adr/0002-operating-modes.md): tre modalità operative indipendenti dal livello di ispezione.
+- [ADR 0003](adr/0003-backend-authentication-authority.md): il backend autentica, il proxy osserva.
 - [AGENTS.md](../AGENTS.md): workflow e verifica per gli assistenti.
 - [Istruzioni del progetto ChatGPT](chatgpt-project-instructions.md): testo da inserire nelle impostazioni del progetto.
