@@ -16,12 +16,12 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
 ---
 
 ## 2. Autenticazione e osservazione degli esiti reali
-- [ ] **Eliminazione della verifica locale delle credenziali** ([ADR 0003](docs/adr/0003-backend-authentication-authority.md)):
+- [x] **Eliminazione della verifica locale delle credenziali** ([ADR 0003](docs/adr/0003-backend-authentication-authority.md)):
   - Rimuovere `verifyCredentialsTBD`, risposte di autenticazione sintetiche, replay LOGIN ricostruito e pesi di rischio basati su verifica locale.
   - Rimuovere l'ipotesi di connettori LDAP/AD e pre-screening account: l'autenticazione appartiene al backend IMAP.
 - [ ] **Osservatore bidirezionale delle autenticazioni**:
-  - Inoltrare byte invariati, incluso greeting, comandi preliminari e risposte tagged, osservando LOGIN e relativi esiti reali per sessione/tag.
-  - Non conservare password né dati SASL sensibili; distinguere esiti indeterminati e coprire quoted strings, literal e AUTHENTICATE nei test.
+  - [x] Inoltrare byte invariati, incluso greeting, comandi preliminari e risposte tagged, osservando LOGIN/AUTHENTICATE e relativi esiti reali per sessione/tag (implementazione iniziale).
+  - [ ] Rafforzare il parser per literal e payload multilinea, esiti indeterminati, limiti di memoria e casi avversari; verificare che nessuna credenziale sia registrata o persistita.
   - In Transparent osservare senza enforcement o persistenza obbligatoria; in Learning alimentare Redis con eventi reali, in Defender usare i segnali secondo politica.
 - [ ] **Test end-to-end con backend Dovecot**:
   - Configurare account di test e verificare OK/NO del backend, comandi preliminari, più autenticazioni e disconnessioni, senza alterare il flusso.
@@ -42,20 +42,20 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
   - `Start()` ripete `Accept()` senza uscire quando il listener è chiuso o restituisce un errore permanente. Gestire la chiusura e distinguere gli errori temporanei da quelli fatali.
 - [x] **Chiusura delle connessioni relay**:
   - Nei relay bidirezionali, al termine di una delle due `io.Copy` l'altra direzione può restare bloccata. Propagare half-close quando supportato, chiudere le connessioni in modo coordinato e attendere entrambe le copie.
-- [ ] **Protezione delle credenziali nei comandi IMAP**:
-  - Il comando LOGIN ricostruito viene interpolato senza escaping. Implementare la codifica IMAP appropriata per virgolette e caratteri speciali e non registrare password o comandi che le contengono.
+- [x] **Eliminazione del replay LOGIN contenente credenziali**:
+  - Il proxy inoltra i byte originali senza ricostruire o registrare il comando LOGIN.
 
 ---
 
 ## 4. Correttezza del Protocollo e Backend
-- [ ] **Allineamento del flusso IMAP in Deep Inspection**:
-  - Il proxy invia un greeting sintetico senza leggere/inoltrare quello del backend e poi cerca LOGIN prima di inoltrare al backend i comandi preliminari. Implementare una state machine IMAP che preservi greeting, capability, comandi e risposte nel corretto ordine, oppure limitare esplicitamente i comandi supportati.
-- [ ] **Parsing completo del comando LOGIN**:
-  - `parseIMAPLogin` usa tokenizzazione per spazi e non implementa le stringhe IMAP quoted con escape o gli argomenti literal. Sostituirlo con parsing conforme al protocollo, applicare limiti espliciti a riga e credenziali e coprire i casi limite nei test.
-- [ ] **Verifica e propagazione dell'esito del backend**:
-  - In modalità Deep il proxy considera riuscita l'autenticazione quando il mock accetta le credenziali, ma non osserva la risposta tagged del backend; registra quindi successi falsi e non inoltra al client l'esito reale. Collegare la decisione e l'evento alla risposta del backend.
-- [ ] **Preservazione dell'input quando LOGIN non è il primo comando**:
-  - Il parser consuma fino a dieci righe e, se non trova LOGIN, la connessione viene chiusa; eventuali comandi già letti non raggiungono il backend. Definire il comportamento per sessioni che non inviano LOGIN subito e preservare tutti i byte letti.
+- [x] **Rimozione del flusso sintetico Deep Inspection**:
+  - Greeting e comandi preliminari sono ora inoltrati dal backend senza replay.
+- [ ] **Parsing passivo IMAP robusto**:
+  - Rendere l'osservatore consapevole di literal e flussi SASL, evitando falsi positivi su dati arbitrari, senza mai alterare il relay.
+- [x] **Propagazione dell'esito del backend**:
+  - Il relay inoltra la risposta tagged originale e l'osservatore rileva OK/NO/BAD per LOGIN/AUTHENTICATE; la persistenza in Learning resta da implementare.
+- [x] **Preservazione dell'input quando LOGIN non è il primo comando**:
+  - Il relay inoltra tutti i byte ricevuti indipendentemente dalla presenza di LOGIN.
 
 ---
 
