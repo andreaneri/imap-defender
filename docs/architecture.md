@@ -2,19 +2,19 @@
 
 ## Riferimento
 
-Questa fotografia descrive il codice al commit `1a5d536a1ea575256ee90072d3c160e93c2ace0f` di `main`. Va aggiornata quando cambia il comportamento. [DOCUMENTAZIONE.md](DOCUMENTAZIONE.md) conserva la guida tecnica e operativa estesa; [TODO.md](../TODO.md) raccoglie il backlog. Le descrizioni progettuali nella guida estesa vanno confrontate con il codice.
+Questa fotografia descrive la base `8ac0809` di `main` e il successivo hardening dell’osservatore sul branch `feat/harden-passive-auth-observer`. [DOCUMENTAZIONE.md](DOCUMENTAZIONE.md) conserva la guida tecnica e operativa estesa; [TODO.md](../TODO.md) raccoglie il backlog. Le descrizioni progettuali nella guida estesa vanno confrontate con il codice.
 
 ## Implementazione attuale (branch di lavoro)
 
-Il proxy termina TLS, calcola JA4, utilizza GeoIP e inoltra byte IMAP originali verso il backend TCP. Il backend genera il greeting e le risposte di autenticazione; il mock `verifyCredentialsTBD`, il LOGIN sintetico e il replay sono rimossi. Un osservatore passivo associa tag LOGIN/AUTHENTICATE alle risposte tagged OK/NO/BAD e registra solo metodo/esito con segnali di connessione. Nessuna password viene intenzionalmente persistita.
+Il proxy termina TLS, calcola JA4, utilizza GeoIP e inoltra byte IMAP originali verso il backend TCP. Il backend genera il greeting e le risposte di autenticazione; il mock `verifyCredentialsTBD`, il LOGIN sintetico e il replay sono rimossi. Un osservatore passivo associa tag LOGIN/AUTHENTICATE alle risposte tagged OK/NO/BAD e registra solo metodo/esito con segnali di connessione. L’osservatore conserva solo tag (massimo 128 byte) e metodo, fino a 64 autenticazioni pendenti: non copia argomenti, corpi literal o payload SASL nei propri buffer. Non persiste eventi in Redis.
 
 Il codice mantiene temporaneamente la valutazione del rischio per connessione basata su JA4/GeoIP, con possibili tarpit o DROP **prima del relay**. Non corrisponde ancora alla modalità Transparent: le modalità Transparent, Learning e Defender non sono implementate. Redis non riceve ancora eventi di autenticazione reali dall'osservatore; il vecchio tracker rimane per compatibilità interna, ma non viene alimentato dai risultati del backend.
 
-L'osservatore è ancora limitato: il parsing passivo di literal e SASL multilinea richiede hardening; i test end-to-end con Dovecot e la verifica completa delle condizioni avversarie restano aperti. L'hot reload TLS e GeoIP richiede ulteriori verifiche di concorrenza.
+L’osservatore salta literal per lunghezza in entrambe le direzioni, gestisce continuazioni e scambi SASL, distinguendo OK/NO/BAD da INDETERMINATE. Alla chiusura, BYE o ambiguità di parsing/correlazione finalizza i tentativi pendenti come indeterminati; su ambiguità sospende l’osservazione per la sessione, mantenendo il relay invariato. I test avversari coprono frammentazione, payload contraffatti, overflow e limiti; i test end-to-end con Dovecot restano aperti. L'hot reload TLS e GeoIP richiede ulteriori verifiche di concorrenza.
 
 ## Decisione di autenticazione
 
-[ADR 0003](adr/0003-backend-authentication-authority.md) è applicato nella rimozione del mock e nell'inoltro degli esiti reali; la piena osservazione protocol-aware e l'integrazione con le modalità operative rimangono attività future.
+[ADR 0003](adr/0003-backend-authentication-authority.md) è applicato nella rimozione del mock e nell'inoltro degli esiti reali; l’integrazione con le modalità operative rimane un’attività futura.
 
 ## Architettura concordata
 
