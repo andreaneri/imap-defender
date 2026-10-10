@@ -137,7 +137,7 @@ L'iniezione del ritardo artificiale avviene in `handleConnection` **dopo** il co
 
 ### 4.1 Relay e osservazione passiva
 
-`relayObserved` inoltra il greeting, i comandi e le risposte originali. Il backend è l’unica autorità di autenticazione: nessuna verifica locale, risposta sintetica o ricostruzione di LOGIN. L’osservatore registra solo metodo ed esito, senza account, password o payload SASL. Non alimenta ancora Redis.
+`relayObserved` inoltra il greeting, i comandi e le risposte originali. Il backend è l’unica autorità di autenticazione: nessuna verifica locale, risposta sintetica o ricostruzione di LOGIN. L’osservatore estrae l’identità dichiarata dal client e la associa all’esito del backend. `authEvent` aggiunge timestamp UTC, IP (senza porta), paese GeoIP e JA4. I log strutturati includono `username`, `username_known`, `authorization_id`, metodo, meccanismo ed esito. Password, token e payload SASL completi non vengono copiati o registrati. Non alimenta ancora Redis.
 
 Il writer osserva i byte prima della scrittura al peer, affinché una risposta immediata non preceda la registrazione del tag. Un errore di scrittura termina il relay e finalizza le autenticazioni senza risposta conclusiva come `INDETERMINATE`.
 
@@ -145,19 +145,25 @@ Il writer osserva i byte prima della scrittura al peer, affinché una risposta i
 
 Il parser streaming riconosce marker finali `{n}`, `{n+}` e `~{n}`, contando e saltando esattamente i byte del literal in entrambe le direzioni, anche attraverso frammenti TCP. Le righe che proseguono un literal non diventano nuovi comandi. I marker nelle stringhe quoted del client sono ignorati; gli escape sono gestiti senza conservare gli argomenti.
 
-Durante AUTHENTICATE vengono ignorati gli argomenti iniziali, le risposte successive e la cancellazione `*`; le challenge `+` del server non vengono conservate. Solo la risposta tagged OK/NO/BAD conclude l’osservazione del tentativo. Il parser non decodifica i meccanismi SASL.
+Per LOGIN l’estrattore conserva solo il primo argomento (atom, quoted con escape o literal); il secondo argomento è attraversato senza essere copiato. La username deve essere completa, UTF-8 valida, non vuota e priva di caratteri di controllo. Non viene normalizzata: è un’identità dichiarata, non un account canonico restituito dal backend.
+
+Per AUTHENTICATE sono supportati PLAIN e il meccanismo legacy LOGIN, con risposta iniziale o continuazione. PLAIN decodifica in streaming soltanto il prefisso Base64 necessario per `authzid` e `authcid`; dopo il secondo NUL azzera l’accumulatore e conta/valida strutturalmente il resto senza decodificare la password. LOGIN decodifica la prima risposta come username e ignora la risposta password. Le challenge del server non sono conservate. `authcid` diventa `username`; `authzid` resta distinto in `authorization_id`.
+
+Meccanismi non supportati (ad esempio SCRAM, OAuth e GSSAPI), identità incomplete, input invalido, cancellazione prima dell’identità e limiti superati producono `username_known=false`, senza inventare account o interferire con il relay. L’esito OK/NO/BAD resta sempre quello del backend, anche quando l’identità non è disponibile.
 
 ### 4.3 Limiti e risultati indeterminati
 
-Sono conservati soltanto i primi due token del framing: tag fino a 128 byte, verbo fino a 16 byte; al massimo 64 autenticazioni pendenti. Le lunghezze dei literal usano un contatore uint64 con controllo overflow e non determinano allocazioni del corpo. Anche argomenti molto lunghi vengono attraversati senza essere copiati.
+Il framing conserva tag fino a 128 byte e verbo fino a 16 byte, con al massimo 64 autenticazioni pendenti. L’estrattore conserva al massimo 1024 byte per identità e 32 byte per meccanismo; la risposta SASL osservata è limitata a 64 KiB (senza buffer del payload). Un account troppo lungo resta sconosciuto, non troncato. Le lunghezze dei literal usano un contatore uint64 con controllo overflow e non determinano allocazioni del corpo. Password e argomenti non pertinenti, anche molto lunghi, vengono attraversati senza essere copiati.
 
 Tag pendenti duplicati, superamento dei limiti, marker incompleti, framing CRLF non valido o perdita di sincronizzazione sospendono l’osservazione per tutta la sessione. I tentativi pendenti diventano `INDETERMINATE`; il relay continua invariato. Una risposta anticipata mentre il client è ancora nel framing di un literal conserva il risultato reale ma sospende l’osservazione successiva. BYE e chiusura del relay finalizzano i tentativi pendenti una sola volta. BAD resta distinto da NO e da un successo.
 
 Il parser è deliberatamente conservativo: non è un validatore IMAP completo, non decodifica traffico compresso né livelli di sicurezza negoziati da SASL. Il limite del tag riguarda solo la telemetria e non rifiuta il traffico. La callback interna deve restare breve; la persistenza Learning richiederà una coda non bloccante.
 
+Le identità pendenti restano in memoria fino all’esito o alla chiusura/invalidazione della sessione; non sono persistite dal parser. La retention dei log è gestita dalla piattaforma di raccolta, non da un TTL applicativo. La persistenza Learning richiederà TTL espliciti prima dell’attivazione ([ADR 0004](adr/0004-account-authentication-signals.md)).
+
 ### 4.4 Verifica e modalità operative
 
-`observer_test.go` copre literal e payload contraffatti, frammentazione fino al singolo byte, quoted strings, SASL, limiti e finalizzazione. `main_test.go` verifica l’inoltro byte per byte; il collaudo con Dovecot resta nel TODO.
+`identity_test.go` verifica estrazione, correlazione, limiti, identità SASL separate e assenza di segreti nei buffer e nei log. `observer_test.go` copre literal e payload contraffatti, frammentazione fino al singolo byte, quoted strings, SASL, limiti e finalizzazione. `main_test.go` verifica l’inoltro byte per byte; il collaudo con Dovecot resta nel TODO.
 
 Transparent, Learning e Defender sono ancora da implementare. L’osservatore non applica contromisure, ma la valutazione del rischio per connessione precedente al relay può ancora ritardare o bloccare: il comportamento complessivo non è ancora Transparent.
 

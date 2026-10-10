@@ -6,7 +6,7 @@ Questa fotografia descrive la base `8ac0809` di `main` e il successivo hardening
 
 ## Implementazione attuale (branch di lavoro)
 
-Il proxy termina TLS, calcola JA4, utilizza GeoIP e inoltra byte IMAP originali verso il backend TCP. Il backend genera il greeting e le risposte di autenticazione; il mock `verifyCredentialsTBD`, il LOGIN sintetico e il replay sono rimossi. Un osservatore passivo associa tag LOGIN/AUTHENTICATE alle risposte tagged OK/NO/BAD e registra solo metodo/esito con segnali di connessione. L’osservatore conserva solo tag (massimo 128 byte) e metodo, fino a 64 autenticazioni pendenti: non copia argomenti, corpi literal o payload SASL nei propri buffer. Non persiste eventi in Redis.
+Il proxy termina TLS, calcola JA4, utilizza GeoIP e inoltra byte IMAP originali verso il backend TCP. Il backend genera il greeting e le risposte di autenticazione; il mock `verifyCredentialsTBD`, il LOGIN sintetico e il replay sono rimossi. Un osservatore passivo associa tag LOGIN/AUTHENTICATE alle risposte tagged OK/NO/BAD e estrae la username dichiarata per LOGIN, SASL PLAIN e SASL LOGIN, associandola agli esiti reali per sessione/tag. L’osservatore conserva tag (massimo 128 byte), metodo e identità limitate a 1024 byte, fino a 64 autenticazioni pendenti. Copia solo le identità: password, token, altri literal e payload SASL completi non sono conservati. L’evento strutturato riunisce timestamp UTC, IP senza porta, paese GeoIP, JA4, username, eventuale identità di autorizzazione SASL, metodo e risultato. Identità non disponibili restano esplicitamente sconosciute; non vengono normalizzate o considerate identità canoniche del backend. Non persiste eventi in Redis.
 
 Il codice mantiene temporaneamente la valutazione del rischio per connessione basata su JA4/GeoIP, con possibili tarpit o DROP **prima del relay**. Non corrisponde ancora alla modalità Transparent: le modalità Transparent, Learning e Defender non sono implementate. Redis non riceve ancora eventi di autenticazione reali dall'osservatore; il vecchio tracker rimane per compatibilità interna, ma non viene alimentato dai risultati del backend.
 
@@ -39,6 +39,7 @@ Le normali chiusure per errori di rete o protocollo restano distinte dalle contr
 
 - [ADR 0001](adr/0001-shared-repository-context.md): GitHub come fonte condivisa.
 - [ADR 0002](adr/0002-operating-modes.md): tre modalità operative indipendenti dal livello di ispezione.
+- [ADR 0004](adr/0004-account-authentication-signals.md): identità dichiarate e segnali di autenticazione, con limiti e assenza di segreti.
 - [ADR 0003](adr/0003-backend-authentication-authority.md): il backend autentica, il proxy osserva.
 - [AGENTS.md](../AGENTS.md): workflow e verifica per gli assistenti.
 - [Istruzioni del progetto ChatGPT](chatgpt-project-instructions.md): testo da inserire nelle impostazioni del progetto.
