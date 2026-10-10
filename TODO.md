@@ -91,7 +91,7 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
 ---
 
 ## 7. Metriche e Osservabilità Avanzata
-- [ ] **Endpoint Metriche Prometheus**:
+- [x] **Endpoint Metriche Prometheus**:
   - Esportare metriche chiave su porta HTTP interna (es. `:9090/metrics`):
     - Connessioni TCP totali e attive.
     - Distribuzione azioni Risk Engine (`ALLOW`, `TARPIT_SOFT`, `TARPIT_HARD`, `DROP`).
