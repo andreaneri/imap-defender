@@ -21,7 +21,8 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
   - Rimuovere l'ipotesi di connettori LDAP/AD e pre-screening account: l'autenticazione appartiene al backend IMAP.
 - [ ] **Osservatore bidirezionale delle autenticazioni**:
   - [x] Inoltrare byte invariati, incluso greeting, comandi preliminari e risposte tagged, osservando LOGIN/AUTHENTICATE e relativi esiti reali per sessione/tag (implementazione iniziale).
-  - [ ] Rafforzare il parser per literal e payload multilinea, esiti indeterminati, limiti di memoria e casi avversari; verificare che nessuna credenziale sia registrata o persistita.
+  - [x] Rafforzare il parser per literal e payload multilinea, esiti indeterminati, limiti di memoria e casi avversari; verificare che password, token e payload completi non siano registrati o persistiti.
+  - [x] Estrarre la username per LOGIN (atom/quoted/literal), SASL PLAIN e SASL LOGIN; distinguere identità sconosciute e authzid, associando timestamp/IP/GeoIP/JA4 ed esito reale in un evento strutturato.
   - In Transparent osservare senza enforcement o persistenza obbligatoria; in Learning alimentare Redis con eventi reali, in Defender usare i segnali secondo politica.
 - [ ] **Test end-to-end con backend Dovecot**:
   - Configurare account di test e verificare OK/NO del backend, comandi preliminari, più autenticazioni e disconnessioni, senza alterare il flusso.
@@ -50,7 +51,7 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
 ## 4. Correttezza del Protocollo e Backend
 - [x] **Rimozione del flusso sintetico Deep Inspection**:
   - Greeting e comandi preliminari sono ora inoltrati dal backend senza replay.
-- [ ] **Parsing passivo IMAP robusto**:
+- [x] **Parsing passivo IMAP robusto**:
   - Rendere l'osservatore consapevole di literal e flussi SASL, evitando falsi positivi su dati arbitrari, senza mai alterare il relay.
 - [x] **Propagazione dell'esito del backend**:
   - Il relay inoltra la risposta tagged originale e l'osservatore rileva OK/NO/BAD per LOGIN/AUTHENTICATE; la persistenza in Learning resta da implementare.

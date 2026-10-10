@@ -135,59 +135,37 @@ L'iniezione del ritardo artificiale avviene in `handleConnection` **dopo** il co
 
 ## 4. Parsing del Protocollo IMAP Inline
 
-### 4.1 Differenze tra HTTP e IMAP: Stateful Command Sniffing
-A differenza del protocollo HTTP (basato su transazioni isolate request-response), IMAP4rev1 è un protocollo testuale fortemente orientato allo stato e sequenziale. 
+### 4.1 Relay e osservazione passiva
 
-Un proxy di sicurezza non può limitarsi a un inoltro cieco dei byte:
-1. Deve sospendere temporaneamente l'inoltro dei flussi al momento dell'autenticazione.
-2. Inviare autonomamente il banner iniziale (*Greeting*) per conformità al protocollo (`* OK [CAPABILITY IMAP4rev1] ...`).
-3. Riconoscere i comandi preliminari innocui (es. `CAPABILITY`, `NOOP`).
-4. Intercettare la sequenza di autenticazione in formato `TAG LOGIN <user> <pass>`.
-5. Valutare credenziali e reputazione:
-   - Se il login è **non valido (KO)**: il proxy emula la risposta negativa di fallimento del protocollo (`TAG NO Authentication failed`), applica il tarpitting configurato e disconnette il client. Il server Dovecot a valle rimane completamente all'oscuro del tentativo ostile.
-   - Se il login è **valido (OK)**: il proxy registra l'evento asincrono su Redis e cede il controllo (*hand-off*) al tunnel bidirezionale trasparente verso il backend.
+`relayObserved` inoltra il greeting, i comandi e le risposte originali. Il backend è l’unica autorità di autenticazione: nessuna verifica locale, risposta sintetica o ricostruzione di LOGIN. L’osservatore estrae l’identità dichiarata dal client e la associa all’esito del backend. `authEvent` aggiunge timestamp UTC, IP (senza porta), paese GeoIP e JA4. I log strutturati includono `username`, `username_known`, `authorization_id`, metodo, meccanismo ed esito. Password, token e payload SASL completi non vengono copiati o registrati. Non alimenta ancora Redis.
 
-### 4.2 Preservazione del Tag Dinamico
-In IMAP ciascun comando emesso dal client è preceduto da un identificatore alfanumerico univoco (*Tag*, es. `A001`, `a02`, `12`). Il server deve rispondere anteponendo rigorosamente lo stesso tag:
-```text
-Client:  A001 LOGIN mario "password segreta"
-Proxy:   A001 NO Authentication failed.
-```
-Se il proxy rispondesse con un tag fisso o non sincronizzato, romperebbe l'automa a stati del client di posta (es. Thunderbird, Outlook) o rivelerebbe la presenza di un dispositivo di intercettazione / honeypot.
+Il writer osserva i byte prima della scrittura al peer, affinché una risposta immediata non preceda la registrazione del tag. Un errore di scrittura termina il relay e finalizza le autenticazioni senza risposta conclusiva come `INDETERMINATE`.
 
-### 4.3 Misure di Protezione Anti-DoS e Anti-Slowloris
-Poiché il parsing applicativo avviene *prima* di aver validato l'identità del client, la funzione `parseIMAPLogin` implementa rigide protezioni sul consumo di memoria:
-- **Limite di righe massime (`maxLines = 10`)**: impedisce a client malevoli di tenere aperta la connessione inviando sequenze infinite di comandi interlocutori.
-- **Limite lunghezza riga (`maxLineLength = 2048`)**: verifica tramite `isPrefix` di `bufio.Reader.ReadLine()` per stroncare payload anomali o tentativi di buffer overflow sulla memoria heap.
-- **Normalizzazione token**: estrazione pulita di username e password eliminando virgolette (`strings.Trim(..., "\"")`) e ricostruendo password contenenti spazi (`strings.Join(tokens[3:], " ")`).
+### 4.2 Framing dei literal e SASL
 
-### 4.4 Replay del Comando LOGIN e Buffer Alignment
-Dato che il proxy intercetta e consuma dal flusso di rete la riga del comando `LOGIN` per eseguire le verifiche crittografiche e applicative, il server a valle (Dovecot) non riceverebbe mai l'istruzione di autenticazione dell'utente.
+Il parser streaming riconosce marker finali `{n}`, `{n+}` e `~{n}`, contando e saltando esattamente i byte del literal in entrambe le direzioni, anche attraverso frammenti TCP. Le righe che proseguono un literal non diventano nuovi comandi. I marker nelle stringhe quoted del client sono ignorati; gli escape sono gestiti senza conservare gli argomenti.
 
-Per ripristinare la trasparenza transazionale verso il backend:
-1. **Replay del comando ricostruito**: Il proxy inietta direttamente nel socket TCP del backend la stringa di autenticazione formattata con il tag originario del client:
-   ```go
-   replayedCommand := fmt.Sprintf("%s LOGIN \"%s\" \"%s\"\r\n", auth.Tag, auth.Username, auth.Password)
-   backendConn.Write([]byte(replayedCommand))
-   ```
-2. **Buffer Alignment**: Nel momento in cui il controllo passa al tunneling bidirezionale concorrente, il proxy legge dal buffer residuo `clientReader` (`bufio.Reader`) e non direttamente dalla connessione grezza `tlsConn`:
-   ```go
-   go func() { _, err := io.Copy(backendConn, clientReader); errChan <- err }()
-   go func() { _, err := io.Copy(tlsConn, backendConn); errChan <- err }()
-   ```
-   Questo evita la perdita irreversibile dei byte o dei comandi successivi già pre-caricati dal buffer durante la lettura del greeting o della login.
+Per LOGIN l’estrattore conserva solo il primo argomento (atom, quoted con escape o literal); il secondo argomento è attraversato senza essere copiato. La username deve essere completa, UTF-8 valida, non vuota e priva di caratteri di controllo. Non viene normalizzata: è un’identità dichiarata, non un account canonico restituito dal backend.
 
-### 4.5 Modalità Duale Operativa: Light vs Deep Inspection
-Il proxy supporta una modalità operativa duale, attivabile tramite il parametro `DeepInspectionMode`:
+Per AUTHENTICATE sono supportati PLAIN e il meccanismo legacy LOGIN, con risposta iniziale o continuazione. PLAIN decodifica in streaming soltanto il prefisso Base64 necessario per `authzid` e `authcid`; dopo il secondo NUL azzera l’accumulatore e conta/valida strutturalmente il resto senza decodificare la password. LOGIN decodifica la prima risposta come username e ignora la risposta password. Le challenge del server non sono conservate. `authcid` diventa `username`; `authzid` resta distinto in `authorization_id`.
 
-1. **Modalità Light (`DeepInspectionMode: false`)**:
-   - Agisce esclusivamente a livello TLS perimetrale (Layer 4/Transport).
-   - Valuta solo i primi 2 segnali di rischio: reputazione del fingerprint JA4 e geolocalizzazione IP.
-   - Non invia alcun greeting sintetico: il banner IMAP iniziale viene erogato direttamente dal server Dovecot a valle appena si apre il tunnel `io.Copy`.
-   - Minimo consumo di CPU e memoria, ideale come scudo anti-DDoS volumetrico o quando non si desidera ispezionare il traffico di autenticazione.
-2. **Modalità Deep Inspection (`DeepInspectionMode: true`)**:
-   - Ispezione profonda applicativa del protocollo IMAP (Layer 7).
-   - Il proxy invia il banner, intercetta la riga `LOGIN`, valida esistenza utenza e credenziali, calcola il punteggio di rischio completo e rigetta gli attaccanti prima che possano toccare il backend.
+Meccanismi non supportati (ad esempio SCRAM, OAuth e GSSAPI), identità incomplete, input invalido, cancellazione prima dell’identità e limiti superati producono `username_known=false`, senza inventare account o interferire con il relay. L’esito OK/NO/BAD resta sempre quello del backend, anche quando l’identità non è disponibile.
+
+### 4.3 Limiti e risultati indeterminati
+
+Il framing conserva tag fino a 128 byte e verbo fino a 16 byte, con al massimo 64 autenticazioni pendenti. L’estrattore conserva al massimo 1024 byte per identità e 32 byte per meccanismo; la risposta SASL osservata è limitata a 64 KiB (senza buffer del payload). Un account troppo lungo resta sconosciuto, non troncato. Le lunghezze dei literal usano un contatore uint64 con controllo overflow e non determinano allocazioni del corpo. Password e argomenti non pertinenti, anche molto lunghi, vengono attraversati senza essere copiati.
+
+Tag pendenti duplicati, superamento dei limiti, marker incompleti, framing CRLF non valido o perdita di sincronizzazione sospendono l’osservazione per tutta la sessione. I tentativi pendenti diventano `INDETERMINATE`; il relay continua invariato. Una risposta anticipata mentre il client è ancora nel framing di un literal conserva il risultato reale ma sospende l’osservazione successiva. BYE e chiusura del relay finalizzano i tentativi pendenti una sola volta. BAD resta distinto da NO e da un successo.
+
+Il parser è deliberatamente conservativo: non è un validatore IMAP completo, non decodifica traffico compresso né livelli di sicurezza negoziati da SASL. Il limite del tag riguarda solo la telemetria e non rifiuta il traffico. La callback interna deve restare breve; la persistenza Learning richiederà una coda non bloccante.
+
+Le identità pendenti restano in memoria fino all’esito o alla chiusura/invalidazione della sessione; non sono persistite dal parser. La retention dei log è gestita dalla piattaforma di raccolta, non da un TTL applicativo. La persistenza Learning richiederà TTL espliciti prima dell’attivazione ([ADR 0004](adr/0004-account-authentication-signals.md)).
+
+### 4.4 Verifica e modalità operative
+
+`identity_test.go` verifica estrazione, correlazione, limiti, identità SASL separate e assenza di segreti nei buffer e nei log. `observer_test.go` copre literal e payload contraffatti, frammentazione fino al singolo byte, quoted strings, SASL, limiti e finalizzazione. `main_test.go` verifica l’inoltro byte per byte; il collaudo con Dovecot resta nel TODO.
+
+Transparent, Learning e Defender sono ancora da implementare. L’osservatore non applica contromisure, ma la valutazione del rischio per connessione precedente al relay può ancora ritardare o bloccare: il comportamento complessivo non è ancora Transparent.
 
 ---
 

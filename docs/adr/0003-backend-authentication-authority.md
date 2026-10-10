@@ -28,6 +28,6 @@ Questa decisione integra [ADR 0002](0002-operating-modes.md), senza sostituirne 
 
 ## Verifica
 
-I test devono dimostrare che solo il backend determina OK/NO, che i byte sono inoltrati invariati e che Transparent non blocca o ritarda per rischio. Le credenziali non devono comparire in log o Redis.
+I test devono dimostrare che solo il backend determina OK/NO, che i byte sono inoltrati invariati e che Transparent non blocca o ritarda per rischio. Password, token e payload contenenti segreti non devono comparire in log o Redis. [ADR 0004](0004-account-authentication-signals.md) specifica l’estrazione delle sole identità dichiarate e i limiti della raccolta.
 
 Vedere [architecture.md](../architecture.md) e [TODO.md](../../TODO.md).

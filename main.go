@@ -553,11 +553,9 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	defer backendConn.Close()
 
 	observer := newAuthObserver(func(result authResult) {
-		// Do not persist or log credentials. Learning-mode persistence is a
-		// separate change; an observed success must not grant global JA4 trust.
-		slog.Info("Backend IMAP authentication result",
-			"remote_ip", remoteAddr, "ja4", ja4Fp,
-			"method", result.Method, "outcome", result.Outcome)
+		// Learning persistence and enforcement are separate changes. A successful
+		// attempt does not grant unconditional trust to the account or fingerprint.
+		logAuthEvent(slog.Default(), newAuthEvent(result, remoteAddr, country, ja4Fp))
 	})
 	if err := relayObserved(tlsConn, backendConn, observer); err != nil {
 		slog.Debug("IMAP relay finished", "remote_ip", remoteAddr, "error", err)
