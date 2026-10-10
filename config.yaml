@@ -12,6 +12,7 @@ logging:
   level: "info"
 
 security:
+  mode: "transparent"
   geoip_db_path: "/geoip/GeoLite2-Country.mmdb"
   thresholds:
     tarpit_soft: 30

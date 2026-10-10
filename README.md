@@ -6,7 +6,7 @@
 
 ## Stato del progetto
 
-Il relay inoltra greeting, comandi e risposte senza ricostruire le credenziali. Le modalità operative **Transparent**, **Learning** e **Defender** sono concordate ma non ancora implementate; le mitigazioni di rischio preesistenti sono ancora attive.
+Il relay inoltra greeting, comandi e risposte senza ricostruire le credenziali. `security.mode` seleziona **Transparent** (default, senza letture/scritture Redis o mitigazioni), **Learning** (eventi reali in Redis senza mitigazioni) e **Defender** (Risk Engine preesistente e apprendimento). Rate limiting ed eccezioni Defender restano da implementare. La migrazione dei vecchi YAML e il comportamento con Redis indisponibile sono descritti in [ADR 0005](docs/adr/0005-mode-runtime-and-learning.md).
 
 Per il comportamento effettivo, le limitazioni e l'evoluzione prevista consultare [Architettura e stato](docs/architecture.md); per le attività aperte consultare [TODO.md](TODO.md).
 

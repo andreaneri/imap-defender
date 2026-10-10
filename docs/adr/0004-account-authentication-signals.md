@@ -2,7 +2,7 @@
 
 - Data: 2026-10-10
 - Stato: Accettato
-- Implementazione: estrazione ed eventi strutturati nel branch feat/harden-passive-auth-observer; apprendimento Redis e politiche operative pendenti
+- Implementazione: estrazione, log e apprendimento Redis implementati; vedere [ADR 0005](0005-mode-runtime-and-learning.md)
 - Integra: [ADR 0003](0003-backend-authentication-authority.md), senza sostituirlo
 
 ## Contesto
