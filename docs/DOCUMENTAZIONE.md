@@ -8,6 +8,12 @@
 
 `security.mode: transparent` è il default: inoltro e osservazione senza accessi Redis o mitigazioni. `learning` accoda eventi di autenticazione reali; `defender` aggiunge il Risk Engine prima del relay. Redis è opzionale solo in Transparent. Migrare esplicitamente i vecchi YAML: `deep_inspection_mode` è rifiutato e le vecchie whitelist JA4 non sono lette. Lo schema attuale conserva osservazioni per 7 giorni e successi JA4/IP per 24 ore, senza concedere whitelist globale. Lookup Defender con timeout 200 ms e fail-open; scritture asincrone transazionali con TTL, non durevoli. La modalità è fissata per sessione; Redis e listener richiedono restart per cambiare configurazione. [ADR 0005](adr/0005-mode-runtime-and-learning.md) dettaglia la politica attuale. Le sezioni storiche sottostanti su whitelist, Deep Inspection e mitigazioni post-LOGIN non descrivono questo runtime.
 
+## Rate limiting connessioni — PR #8
+
+In modalità `defender`, `security.rate_limit.enabled: true` attiva un token bucket locale per IP sorgente dopo l’handshake TLS e prima del dial del backend IMAP. `per_minute` controlla il refill e `burst` la capacità. `except_cidrs` elenca reti canoniche esentate **solo** dal rate limiter, non dal Risk Engine. Il default è disabilitato; Transparent e Learning non applicano il limite. Il limite è per processo, non distribuito, e può penalizzare utenti dietro NAT condiviso. La saturazione della tabella di 100.000 bucket rifiuta nuovi IP finché non si libera spazio. Le connessioni respinte sono conteggiate separatamente in `imap_rate_limit_rejected_total`; `imap_risk_decisions_total` riguarda soltanto il Risk Engine. Vedere [ADR 0006](adr/0006-defender-ip-rate-limiting.md).
+
+I contatori Redis username/IP sono telemetria (ADR 0007); l’enforcement per account è fuori scope della PR #8 (ADR 0008). Il collaudo locale Dovecot/Redis rimane differito.
+
 ## Indice dei Contenuti
 1. [Visione Generale dell'Architettura](#1-visione-generale-dellarchitettura)
 2. [Ciclo di Vita della Connessione e Fingerprinting TLS (JA4+)](#2-ciclo-di-vita-della-connessione-e-fingerprinting-tls-ja4)
