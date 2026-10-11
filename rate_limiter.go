@@ -75,6 +75,8 @@ func (l *ipRateLimiter) allow(ip string, rate, burst int, now time.Time) bool {
             if b.tokens > float64(burst) { b.tokens = float64(burst) }
         }
     }
+    // Record the accounting instant, including denied attempts, to avoid
+    // double-counting refill time. Rejected attempts do not consume tokens.
     b.updated = now
     if b.tokens < 1 { l.buckets[ip] = b; return false }
     b.tokens--
