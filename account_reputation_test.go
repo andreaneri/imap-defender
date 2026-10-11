@@ -26,7 +26,7 @@ func (p *reputationPipe) Expire(_ context.Context, key string, _ time.Duration) 
     p.commands=append(p.commands,reputationCommand{"expire",key}); return nil
 }
 func TestAccountReputationScopedCounters(t *testing.T) {
-    base:=authEvent{UsernameKnown:true,Username:"alice",JA4:"fp",RemoteIP:"192.0.2.1",CountryCode:"IT",Outcome:"NO",Timestamp:time.Unix(1000,0)}
+    base:=authEvent{authResult:authResult{UsernameKnown:true,Username:"alice",Outcome:"NO"},JA4:"fp",RemoteIP:"192.0.2.1",CountryCode:"IT",Timestamp:time.Unix(1000,0)}
     capture:=func(e authEvent) []reputationCommand {
         p:=&reputationPipe{}
         queueAccountReputation(context.Background(),p,e)
@@ -41,8 +41,8 @@ func TestAccountReputationScopedCounters(t *testing.T) {
     if first[0].key!=second[0].key {t.Fatal("account key changed with IP")}
     other.CountryCode="DE"
     third:=capture(other)
-    if first[4].key!=third[4].key {t.Fatal("global counter changed with country")}
-    if first[6].key==third[6].key {t.Fatal("country counters not isolated")}
+    if first[3].key!=third[3].key {t.Fatal("global counter changed with country")}
+    if first[5].key==third[5].key {t.Fatal("country counters not isolated")}
     other.CountryCode="ZZ"
     if got:=count(capture(other),"incr");got!=1 {t.Fatalf("unknown country created scoped counter: %d",got)}
     other.Outcome="OK"
