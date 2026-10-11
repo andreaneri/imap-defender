@@ -14,6 +14,7 @@ type ipRateLimiter struct {
     mu sync.Mutex
     buckets map[string]ipBucket
     lastCleanup time.Time
+    lastCapacityCleanup time.Time
 }
 
 type ipBucket struct {
@@ -50,11 +51,15 @@ func (l *ipRateLimiter) allow(ip string, rate, burst int, now time.Time) bool {
     }
     idle := time.Duration(idleSeconds * float64(time.Second))
     if idle < time.Second { idle = time.Second }
-    if l.lastCleanup.IsZero() || now.Sub(l.lastCleanup) >= time.Minute || len(l.buckets) >= maxRateLimitBuckets {
+    atCapacity := len(l.buckets) >= maxRateLimitBuckets
+    regularCleanup := l.lastCleanup.IsZero() || now.Sub(l.lastCleanup) >= time.Minute
+    capacityCleanup := atCapacity && (l.lastCapacityCleanup.IsZero() || now.Sub(l.lastCapacityCleanup) >= time.Second)
+    if regularCleanup || capacityCleanup {
         for key, bucket := range l.buckets {
             if now.Sub(bucket.updated) >= idle { delete(l.buckets, key) }
         }
         l.lastCleanup = now
+        if atCapacity { l.lastCapacityCleanup = now }
     }
     b, ok := l.buckets[ip]
     if !ok {
