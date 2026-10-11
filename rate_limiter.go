@@ -53,16 +53,9 @@ func (l *ipRateLimiter) allow(ip string, rate, burst int, now time.Time) bool {
     b, ok := l.buckets[ip]
     if !ok {
         if len(l.buckets) >= maxRateLimitBuckets {
-            // Bounded-memory policy: evict the oldest bucket rather than
-            // silently disabling enforcement for newly observed IPs.
-            var oldestKey string
-            var oldest time.Time
-            for key, candidate := range l.buckets {
-                if oldestKey == "" || candidate.updated.Before(oldest) {
-                    oldestKey, oldest = key, candidate.updated
-                }
-            }
-            delete(l.buckets, oldestKey)
+            // Saturated storage must not grant an untracked source a fresh
+            // burst. Reject until an idle bucket can be reclaimed.
+            return false
         }
         b = ipBucket{tokens: float64(burst), updated: now}
     } else {
