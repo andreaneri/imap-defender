@@ -63,3 +63,7 @@ Shadow reads execute serially in the Redis worker and may reduce event-queue thr
 ## Inert response-gate primitives (feature branch)
 
 `response_gate_primitives.go` introduces an intentionally **unwired** single-line tagged NO/BAD classifier, a cancellable wait, and a short-write-safe unchanged-byte forwarding helper, with unit tests. This is **not** a production IMAP response gate: it cannot by itself correlate the response with a LOGIN/AUTHENTICATE request, safely frame server literals, distinguish pipelined commands, or handle SASL/security layers. No actual response pacing is enabled. A future gate must process the complete bidirectional protocol stream and fail open on ambiguous framing; do not directly install these primitives as an `io.Copy` writer wrapper.
+
+## Inert response stream framing increment
+
+A bounded `responseFrameScanner` has been added on the feature branch, with fragmentation, literal-injection and fail-open unit tests. It scans CRLF-terminated physical server lines and skips recognized literal payloads without retaining them. The component is **not wired to the relay**. It does not track commands or authentication tags, and its limited literal-marker recognition is not a complete IMAP grammar: quoted text, extension syntax and ambiguous server frames require further handling before enforcement. It cannot justify delaying any bytes. Tests are committed but not yet executed.
