@@ -1,7 +1,7 @@
 # 0009 — Account/JA4/country adaptive enforcement policy
 
 - Date: 2026-10-11
-- Status: Proposed; not implemented
+- Status: Proposed; L1 JA4/IP opt-in and L2 Redis telemetry implemented on feature branch; enforcement not implemented
 - Supersedes: [ADR 0008](0008-account-aware-response-pacing.md) for the account-aware policy; retains its protocol-safety requirements
 - Extends: [ADR 0003](0003-backend-authentication-authority.md), [ADR 0004](0004-account-authentication-signals.md), [ADR 0007](0007-account-failure-counters.md)
 
@@ -43,3 +43,9 @@ Test unknown account first OK/NO, same and changed JA4/IP, changing country, sha
 ## Consequences
 
 The policy reduces country-crossing collateral damage but cannot prevent false positives for two clients sharing account, JA4 and country. GeoIP can be inaccurate or evaded. The previous IP-only rate limiter and username/IP failure counter remain current runtime behavior until separately migrated; this ADR must not be described as implemented.
+
+## Incremental implementation (feature branch)
+
+The branch `feat/adr-0008-response-pacing` adds an opt-in `rate_limit.scope: ja4_ip` (with IP fallback if JA4 is absent), and writes account reputation through the existing asynchronous Redis pipeline. Keys use `proxy:account:v1:` plus a SHA-256 digest of JSON-encoded fields: `known(account)`, `origin(account,JA4,IP)`, `failures(account,JA4)`, and `country-failures(account,JA4,country)`. The account marker and origin record expire after 30 days; counters after 15 minutes of inactivity. Unknown country `ZZ` is excluded from country counters. OK updates the origin's last success but does not erase global failures. The original username/IP counters remain intact.
+
+The reputation schema is telemetry only: no account-aware read is currently wired into the relay, no tarpit, no block key, and no account-level mitigation. The asynchronous queue can reorder observations under concurrent producers or lose events under pressure. The `AccountKnown` read returns errors separately; an error is not a knowledge state. Tests are committed but have not yet been executed in the required Go environment.
