@@ -160,6 +160,7 @@ func validateConfig(c *Config) error {
 	if c.Security.RateLimit.Enabled {
 		if c.Security.Mode != ModeDefender { return fmt.Errorf("security.rate_limit requires defender mode") }
 		if c.Security.RateLimit.PerMinute <= 0 || c.Security.RateLimit.Burst <= 0 { return fmt.Errorf("security.rate_limit requires positive per_minute and burst") }
+		if c.Security.RateLimit.Burst > 100000 || c.Security.RateLimit.PerMinute > 1000000 { return fmt.Errorf("security.rate_limit burst must be <= 100000 and per_minute <= 1000000") }
 	}
 	t := c.Security.Thresholds
 	if t.TarpitSoft <= 0 || t.TarpitSoft >= t.TarpitHard || t.TarpitHard >= t.Drop || t.Drop > 100 {
