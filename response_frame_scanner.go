@@ -48,6 +48,9 @@ func (s *responseFrameScanner) feed(chunk []byte) []responseFrame {
             return nil
         }
         s.literal = literal
+        // Clear the previous physical line before reusing the backing buffer.
+        // Server responses may contain sensitive mailbox metadata.
+        clear(s.line)
         s.line = s.line[:0]
     }
     return frames
@@ -56,6 +59,7 @@ func (s *responseFrameScanner) feed(chunk []byte) []responseFrame {
 func (s *responseFrameScanner) disable() {
     s.disabled = true
     s.literal = 0
+    clear(s.line)
     s.line = nil
 }
 
