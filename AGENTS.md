@@ -43,6 +43,21 @@ La selezione `security.mode`, Transparent, Learning e il gating del Risk Engine 
 - Una decisione architetturale che cambia deve avere un nuovo ADR che indica quale decisione sostituisce.
 - Prima di proporre funzionalità, verificare se sono già presenti. Non ampliare lo scope senza necessità.
 
+## Autonomia operativa e continuità dello sviluppo
+
+Quando l'utente autorizza un obiettivo funzionale di sviluppo, l'autorizzazione copre le operazioni ordinarie necessarie per completarlo.
+
+- Non interrompere il lavoro dopo singoli commit, modifiche, test o micro-attività e non richiedere ripetutamente «procediamo».
+- Effettuare autonomamente più commit sul branch di lavoro, con verifiche intermedie.
+- Completare implementazione, test, correzioni, documentazione e aggiornamento di TODO.md prima di restituire il controllo.
+- Usare una sola pull request per obiettivo funzionale, salvo diversa indicazione.
+- Non chiedere conferme per scelte implementative ordinarie coerenti con gli ADR vigenti.
+- Fermarsi soltanto per decisioni architetturali irrisolte, rischi significativi, operazioni irreversibili o impedimenti tecnici effettivi.
+- Non effettuare merge su main senza autorizzazione esplicita.
+- Se una validazione locale non è disponibile, documentare il limite e continuare con le attività indipendenti.
+
+L'unità di lavoro è l'obiettivo funzionale concordato, non il singolo commit. Questa regola non autorizza a dichiarare completata una funzionalità non verificata o a disattendere i vincoli di sicurezza e protocollo.
+
 ## Verifica
 
 Per modifiche al codice usare i target del Makefile:
