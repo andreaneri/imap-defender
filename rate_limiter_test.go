@@ -102,3 +102,18 @@ func TestRateLimiterFullRefill(t *testing.T) {
     for i:=0;i<3;i++ { if !l.allow("203.0.113.1", 60, 3, start.Add(time.Minute)) { t.Fatal("refill incomplete") } }
     if l.allow("203.0.113.1", 60, 3, start.Add(time.Minute)) { t.Fatal("over-refill") }
 }
+
+func TestRateLimiterCapacityDoesNotResetActiveQuotas(t *testing.T) {
+    now := time.Unix(1000, 0)
+    l := ipRateLimiter{buckets: make(map[string]ipBucket, maxRateLimitBuckets)}
+    for i:=0;i<maxRateLimitBuckets;i++ {
+        l.buckets[fmt.Sprintf("source-%d", i)] = ipBucket{tokens: 0, updated: now}
+    }
+    l.lastCleanup = now
+    if l.allow("new-source", 60, 2, now) { t.Fatal("new source admitted at capacity") }
+    if len(l.buckets) != maxRateLimitBuckets { t.Fatal("bucket capacity changed") }
+    if l.allow("source-1", 60, 2, now) { t.Fatal("existing exhausted source gained tokens") }
+    if !l.allow("new-source", 60, 2, now.Add(2*time.Minute)) {
+        t.Fatal("idle cleanup did not free capacity")
+    }
+}
