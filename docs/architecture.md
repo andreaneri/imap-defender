@@ -2,13 +2,13 @@
 
 ## Riferimento
 
-Questa fotografia descrive l'implementazione delle modalità sul branch `feat/operating-modes`, a partire da `9d28426` di `main`. [DOCUMENTAZIONE.md](DOCUMENTAZIONE.md) conserva la guida estesa; [TODO.md](../TODO.md) raccoglie il backlog.
+Questa fotografia descrive il runtime su `main` e le estensioni Defender proposte nella PR #8 (`feat/defender-rate-limiter`). [DOCUMENTAZIONE.md](DOCUMENTAZIONE.md) conserva la guida estesa; [TODO.md](../TODO.md) raccoglie il backlog.
 
 ## Implementazione attuale
 
 Il proxy termina TLS, calcola JA4, usa GeoIP opzionale e inoltra byte IMAP invariati al backend TCP. L'osservatore passivo correla LOGIN/AUTHENTICATE e OK/NO/BAD/INDETERMINATE, estraendo username e authzid per LOGIN atom/quoted/literal e SASL PLAIN/LOGIN. Conserva fino a 64 tentativi, tag di 128 byte e identità di 1024 byte; non conserva password, token o payload completi. Ambiguità, BYE e chiusura finalizzano i pendenti come indeterminati senza alterare il relay.
 
-`security.mode` seleziona Transparent (default), Learning o Defender. Transparent osserva e logga senza accedere a Redis né mitigare. Learning persiste asincronicamente eventi reali senza classificare o mitigare. Defender legge lo storico JA4/IP e applica il Risk Engine preesistente prima del relay, con tarpit/DROP configurabili; persiste gli stessi eventi. Rate limiting ed eccezioni restano futuri.
+`security.mode` seleziona Transparent (default), Learning o Defender. Transparent osserva e logga senza accedere a Redis né mitigare. Learning persiste asincronicamente eventi reali senza classificare o mitigare. Defender legge lo storico JA4/IP e applica il Risk Engine preesistente prima del relay, con tarpit/DROP configurabili; persiste gli stessi eventi. La PR #8 aggiunge un token bucket locale per IP (disabilitato di default), eccezioni CIDR e contatori Redis di fallimento per username/IP. L’enforcement per account nel relay rimane aperto.
 
 Redis conserva l'ultima osservazione per identità/origine/metodo con TTL 7 giorni e un segnale di successo JA4/IP con TTL 24 ore. OK con identità nota crea il segnale; gli altri esiti restano distinti. Nessuna whitelist globale, nessuna lettura delle vecchie chiavi di trust. Il lookup Defender ha timeout 200 ms e fallisce aperto sull'intera decisione; le scritture non bloccano i client, possono essere perse e sono transazionali con TTL. Vedere [ADR 0005](adr/0005-mode-runtime-and-learning.md) per schema, migrazione, retention e limiti.
 
@@ -35,7 +35,7 @@ Questa separazione è logica; non prescrive nuovi package o dipendenze.
 | Learning | Traffico ed esiti reali | Sì | Nessuna |
 | Defender | Segnali ed esiti reali | Secondo politica configurata | Rate limiting, rallentamento e blocco |
 
-Le normali chiusure per errori di rete o protocollo restano distinte dalle contromisure. Il livello di ispezione e la modalità operativa sono dimensioni indipendenti. Configurazione, default, Redis e limiti sono specificati in ADR 0005. Rate limiting ed eccezioni rimangono da progettare.
+Le normali chiusure per errori di rete o protocollo restano distinte dalle contromisure. Il livello di ispezione e la modalità operativa sono dimensioni indipendenti. Configurazione, default, Redis e limiti sono specificati in ADR 0005. Rate limiting per IP ed eccezioni CIDR sono implementati nella PR #8; l’enforcement per account è ancora da progettare e validare.
 
 ## Decisioni e collaborazione
 
@@ -47,3 +47,4 @@ Le normali chiusure per errori di rete o protocollo restano distinte dalle contr
 - [Istruzioni del progetto ChatGPT](chatgpt-project-instructions.md): testo da inserire nelle impostazioni del progetto.
 
 - [ADR 0005](adr/0005-mode-runtime-and-learning.md): modalità runtime, migrazione e apprendimento Redis.
+\n- [ADR 0006](adr/0006-defender-ip-rate-limiting.md): rate limiting per IP e gestione della capacità.\n- [ADR 0007](adr/0007-account-failure-counters.md): contatori di fallimento per username/IP.\n
