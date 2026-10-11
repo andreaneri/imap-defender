@@ -54,8 +54,10 @@ func (g *responseOutputGate) Write(p []byte) (int, error) {
         // does not infer IMAP message boundaries or retain response literals.
         if end:=bytes.LastIndex(g.pending,[]byte("\r\n"));end>=0 {
             if err:=writeUnchanged(g.dst,g.pending[:end+2]);err!=nil {g.closed=true;return consumed,err}
+            remainder := len(g.pending)-end-2
             copy(g.pending,g.pending[end+2:])
-            g.pending=g.pending[:len(g.pending)-end-2]
+            clear(g.pending[remainder:])
+            g.pending=g.pending[:remainder]
         }
     }
     return consumed,nil
