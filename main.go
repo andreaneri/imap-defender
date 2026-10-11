@@ -626,7 +626,7 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	country := p.getCountryCode(remoteAddr)
 	ip, _, _ := net.SplitHostPort(remoteAddr)
 	if !p.rateLimiter.allowConnectionRate(currentCfg, ip, time.Now()) {
-		if p.metrics != nil { p.metrics.recordDecision("DROP") }
+		if p.metrics != nil { p.metrics.rateLimitRejected.Add(1) }
 		slog.Warn("Connection rate limited", "remote_ip", ip)
 		return
 	}
