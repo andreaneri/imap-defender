@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+ "testing"
+ "strconv"
+)
 
 func TestAuthResponseCorrelator(t *testing.T) {
     var c authResponseCorrelator
@@ -25,7 +28,7 @@ func TestAuthResponseCorrelatorAmbiguity(t *testing.T) {
 func TestAuthResponseCorrelatorLimit(t *testing.T) {
     var c authResponseCorrelator
     for i:=0;i<maxPendingAuth;i++ {
-        if !c.register("A"+string(rune('a'+i)),"LOGIN") {t.Fatalf("registration %d",i)}
+        if !c.register("A"+strconv.Itoa(i),"LOGIN") {t.Fatalf("registration %d",i)}
     }
     if c.register("overflow","LOGIN") || !c.disabled {t.Fatal("limit not enforced")}
 }
