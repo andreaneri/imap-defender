@@ -50,6 +50,7 @@ func (s *authCommandScanner) feed(chunk []byte) []observedAuthCommand {
             s.disable()
             return nil
         }
+        clear(s.line)
         s.line = s.line[:0]
     }
     return result
