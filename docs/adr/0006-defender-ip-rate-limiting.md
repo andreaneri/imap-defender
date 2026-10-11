@@ -6,7 +6,7 @@
 
 ## Decision and scope
 
-Defender may apply an in-process token bucket keyed by the source IP address, after TLS handshake and before dialing the IMAP backend. `security.rate_limit.enabled` defaults to false. `per_minute` is the refill rate and `burst` the maximum token balance. Each accepted attempt consumes one token, including attempts that later fail authentication or are rejected by the Risk Engine. Rejected attempts close the connection without contacting the backend. Transparent and Learning do not enforce the limit.
+Defender may apply an in-process token bucket keyed by the source IP address, after TLS handshake and before dialing the IMAP backend. `security.rate_limit.enabled` defaults to false. `per_minute` is the refill rate (1–1,000,000) and `burst` the maximum token balance (1–100,000). Values outside these operational bounds are rejected at configuration load. Each accepted attempt consumes one token, including attempts that later fail authentication or are rejected by the Risk Engine. Rejected attempts close the connection without contacting the backend. Transparent and Learning do not enforce the limit.
 
 `security.rate_limit.except_cidrs` accepts canonical IP prefixes, such as `192.0.2.0/24` or `2001:db8::/32`. An exception bypasses only the connection rate limiter: it does not bypass risk scoring, tarpit or DROP. Do not add exceptions based on JA4; TLS fingerprints can be shared across unrelated clients. Use the directly connected peer IP, not an untrusted client-supplied header.
 
