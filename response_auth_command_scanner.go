@@ -46,7 +46,7 @@ func (s *authCommandScanner) feed(chunk []byte) []observedAuthCommand {
         // A command with any literal syntax cannot be safely tracked by
         // this deliberately narrow single-line parser. It must not scan
         // subsequent literal payload as though it were a command.
-        if bytes.Contains(body, []byte("{")) || bytes.Contains(body, []byte("~{")) {
+        if hasUnsupportedLiteralMarker(body) {
             s.disable()
             return nil
         }
@@ -107,4 +107,25 @@ func skipLoginAstring(p []byte) ([]byte,bool) {
     }
     if i==0 {return nil,false}
     return p[i:],true
+}
+
+// hasUnsupportedLiteralMarker rejects only plausible IMAP literal markers,
+// including non-synchronizing and binary literals. A brace in a quoted
+// password is not a literal marker.
+func hasUnsupportedLiteralMarker(body []byte) bool {
+    quoted, escaped := false, false
+    for i:=0;i<len(body);i++ {
+        b:=body[i]
+        if quoted {
+            if escaped {escaped=false;continue}
+            if b=='\\' {escaped=true;continue}
+            if b=='"' {quoted=false}
+            continue
+        }
+        if b=='"' {quoted=true;continue}
+        if b=='{' && i+1<len(body) && body[i+1]>='0' && body[i+1]<='9' {
+            return true
+        }
+    }
+    return false
 }
