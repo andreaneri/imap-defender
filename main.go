@@ -624,7 +624,7 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	// including its greeting and tagged authentication responses, are relayed.
 	country := p.getCountryCode(remoteAddr)
 	ip, _, _ := net.SplitHostPort(remoteAddr)
-	if currentCfg.Security.Mode == ModeDefender && currentCfg.Security.RateLimit.Enabled && !allowedSource(ip, currentCfg.Security.RateLimit.ExceptCIDRs) && !p.rateLimiter.allow(ip, currentCfg.Security.RateLimit.PerMinute, currentCfg.Security.RateLimit.Burst, time.Now()) {
+	if !p.rateLimiter.allowConnectionRate(currentCfg, ip, time.Now()) {
 		if p.metrics != nil { p.metrics.recordDecision("DROP") }
 		slog.Warn("Connection rate limited", "remote_ip", ip)
 		return
