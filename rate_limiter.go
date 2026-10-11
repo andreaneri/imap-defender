@@ -70,3 +70,16 @@ func (l *ipRateLimiter) allow(ip string, rate, burst int, now time.Time) bool {
     l.buckets[ip] = b
     return true
 }
+
+// allowConnectionRate applies the session's immutable configuration snapshot.
+// Exceptions never bypass the separate Risk Engine.
+func (l *ipRateLimiter) allowConnectionRate(cfg *Config, ip string, now time.Time) bool {
+    if cfg.Security.Mode != ModeDefender || !cfg.Security.RateLimit.Enabled {
+        return true
+    }
+    policy := cfg.Security.RateLimit
+    if allowedSource(ip, policy.ExceptCIDRs) {
+        return true
+    }
+    return l.allow(ip, policy.PerMinute, policy.Burst, now)
+}
