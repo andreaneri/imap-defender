@@ -1,0 +1,45 @@
+# 0009 — Account/JA4/country adaptive enforcement policy
+
+- Date: 2026-10-11
+- Status: Proposed; not implemented
+- Supersedes: [ADR 0008](0008-account-aware-response-pacing.md) for the account-aware policy; retains its protocol-safety requirements
+- Extends: [ADR 0003](0003-backend-authentication-authority.md), [ADR 0004](0004-account-authentication-signals.md), [ADR 0007](0007-account-failure-counters.md)
+
+## Decision and scope
+
+Defender has two independent controls:
+
+1. **L1 admission rate limiting** uses the pair (JA4, direct peer IP), limiting connection volume before an account is known. This is a **target design**, not the existing IP-only limiter in ADR 0006. Transparent and Learning never enforce it.
+2. **L2 account-aware enforcement** uses authoritative backend authentication outcomes and the history of the exact declared authcid. An account with no historical outcomes is **UNKNOWN** and is observed without account-aware mitigation; after the first backend OK/NO/BAD it is **KNOWN**. Known does not mean legitimate or trusted. A failed login does not prove the account exists.
+
+There is no third *knowledge* state. Redis timeout/unavailability or ambiguous protocol parsing is an operational failure: **fail open** for L2; do not infer account history or impose account-based restrictions.
+
+## Reputation and enforcement scopes
+
+- Maintain history for (account, JA4, IP), and aggregate failure signals for (account, JA4) across IPs. JA4 is a shared fingerprint, not a unique client identifier.
+- A previously successful (account, JA4, IP) origin is a favorable signal, **not** a permanent allowlist or exemption from L1.
+- For known accounts, a changed JA4 or IP may trigger **soft pacing of an authoritative negative response**, but never penalizes an OK response merely because the origin changed.
+- Escalate delays on repeated authoritative authentication failures. Apply temporary blocks **only** to (account, JA4, country), independent of IP. No account-wide block, no global JA4 block, no block of other countries for the same account/JA4.
+- Global (account, JA4) failures may increase suspicion in a new country but must not automatically propagate an existing country-specific block.
+- A country-specific block needs local corroborating failures and an explicit threshold. Country ZZ/unknown is not a reliable location and must not be treated as a distinct trustworthy geography; do not issue country-scoped blocks without a valid GeoIP country.
+- Blocking has a fixed, configurable TTL, without extension on denied attempts. After expiry, allow a fresh bounded evaluation. Limit concurrent tarpits to protect proxy capacity.
+
+Initial thresholds, windows, delays and TTLs are **not decided**; choose conservative, opt-in values and validate with tests and telemetry before enabling blocks.
+
+## Protocol and safety constraints
+
+The backend remains the only authentication authority. Never verify passwords locally, synthesize an IMAP LOGIN/AUTHENTICATE result, change backend response bytes, or leak credentials. The response gate must preserve IMAP tagged correlation, literals, SASL exchanges, greeting, pipeline ordering and already-buffered bytes. Unknown or ambiguous framing bypasses L2 enforcement. Avoid blocking or sleeping under observer locks; use bounded Redis reads, cancellable timers and memory limits.
+
+**Open implementation question:** a pre-backend account-specific block cannot be represented as a normal authentication rejection without violating ADR 0003. The eventual mechanism for enforcing a block (for example, closing the connection before forwarding a command) must be separately specified and tested for client compatibility. Until then, BLOCK is a *policy decision*, not an implemented action; response pacing of genuine backend NO/BAD is the first implementation stage.
+
+## Storage and privacy
+
+Hash exact account and origin components in Redis keys; never put plaintext credentials or auth commands in keys/logs. Keep separate bounded TTLs for account history, per-origin successes, (account, JA4) failures and (account, JA4, country) block state. Existing asynchronous event queue can lag or lose updates; do not treat counters as perfectly synchronized. A successful backend authentication should reduce suspicion for the corresponding origin without clearing unrelated suspicious histories.
+
+## Verification requirements
+
+Test unknown account first OK/NO, same and changed JA4/IP, changing country, shared JA4 across accounts, shared IP, distributed IP rotation, Redis failures, unknown GeoIP, fixed block expiry, backend OK unaffected, fragmented/pipelined IMAP, SASL, cancellation, and byte-for-byte forwarding. Dovecot/Redis end-to-end validation remains deferred until functional development is complete.
+
+## Consequences
+
+The policy reduces country-crossing collateral damage but cannot prevent false positives for two clients sharing account, JA4 and country. GeoIP can be inaccurate or evaded. The previous IP-only rate limiter and username/IP failure counter remain current runtime behavior until separately migrated; this ADR must not be described as implemented.
