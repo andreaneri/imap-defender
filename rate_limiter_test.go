@@ -155,3 +155,19 @@ func TestRateLimiterExtremeParameters(t *testing.T) {
     if !l.allow("192.0.2.2", math.MaxInt, 1, now) { t.Fatal("large refill denied") }
     if l.allow("192.0.2.2", math.MaxInt, 1, now) { t.Fatal("burst exceeded") }
 }
+
+func TestRateLimiterCapacityCleanupThrottled(t *testing.T) {
+    now := time.Unix(1000, 0)
+    l := ipRateLimiter{buckets: make(map[string]ipBucket, maxRateLimitBuckets)}
+    for i:=0; i<maxRateLimitBuckets; i++ {
+        l.buckets[fmt.Sprintf("source-%d", i)] = ipBucket{tokens: 0, updated: now}
+    }
+    l.lastCleanup = now
+    if l.allow("new-1", 60, 2, now) { t.Fatal("new IP admitted at capacity") }
+    first := l.lastCapacityCleanup
+    if first.IsZero() { t.Fatal("capacity cleanup not recorded") }
+    if l.allow("new-2", 60, 2, now.Add(100*time.Millisecond)) { t.Fatal("new IP admitted") }
+    if !l.lastCapacityCleanup.Equal(first) { t.Fatal("capacity cleanup repeated within throttle interval") }
+    if l.allow("new-3", 60, 2, now.Add(2*time.Second)) { t.Fatal("new IP admitted") }
+    if !l.lastCapacityCleanup.After(first) { t.Fatal("capacity cleanup did not resume") }
+}
