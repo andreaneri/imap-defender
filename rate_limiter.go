@@ -2,6 +2,7 @@ package main
 
 import (
     "net/netip"
+    "math"
     "sync"
     "time"
 )
@@ -42,7 +43,12 @@ func (l *ipRateLimiter) allow(ip string, rate, burst int, now time.Time) bool {
     if l.buckets == nil { l.buckets = make(map[string]ipBucket) }
     // An inactive bucket has recovered its entire burst. Evicting it
     // cannot grant any more tokens than keeping it would.
-    idle := time.Duration(float64(burst) / float64(rate) * float64(time.Minute))
+    idleSeconds := float64(burst) * 60 / float64(rate)
+    // Clamp extreme configurations to prevent time.Duration overflow.
+    if idleSeconds > float64(math.MaxInt64)/float64(time.Second) {
+        idleSeconds = float64(math.MaxInt64)/float64(time.Second)
+    }
+    idle := time.Duration(idleSeconds * float64(time.Second))
     if idle < time.Second { idle = time.Second }
     if l.lastCleanup.IsZero() || now.Sub(l.lastCleanup) >= time.Minute || len(l.buckets) >= maxRateLimitBuckets {
         for key, bucket := range l.buckets {
