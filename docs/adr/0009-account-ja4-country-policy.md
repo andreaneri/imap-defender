@@ -91,3 +91,9 @@ The feature branch adds `authForwardCoordinator`, an isolated, mutex-protected t
 The branch adds `responseOutputGate`, a **disconnected** writer that buffers physical server response lines up to 16 KiB, forwards completed lines unchanged, flushes incomplete bytes on EOF, and permanently falls back to direct passthrough when a line exceeds the limit. Unit tests cover TCP fragmentation, byte integrity, literal-looking data, oversized lines, EOF and writer errors. No policy decision, authentication correlation, or timer is connected.
 
 **Do not wire this writer into production yet.** Line buffering itself changes delivery timing and may affect IMAP continuations, literals and interactive clients even without configured pacing. The component does not parse full IMAP framing and cannot distinguish safe tagged authentication completions from unrelated output. A production gate needs an explicit latency budget, precise byte offsets, cancellation and bounded buffering, and must avoid withholding unrelated responses. The existing relay remains unchanged; all tests are committed but not executed.
+
+## Output gate buffer hygiene and release criterion
+
+The inert output writer now clears consumed bytes after compacting its bounded buffer. Additional regression tests assert that complete greeting and continuation lines are forwarded immediately and that the remaining buffered suffix is preserved in order. The gate is still disconnected from the relay and does not apply pacing. These tests are committed but unexecuted.
+
+Before wiring it to live traffic, require a test harness demonstrating byte-for-byte equivalence **and** bounded additional latency across split CRLF, literal continuations, SASL exchanges, pipelined commands, cancellation, EOF and partial writes. Holding an incomplete physical line until CRLF may introduce unacceptable latency even with pacing disabled; do not interpret the current tests as proof of protocol compatibility.
