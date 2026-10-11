@@ -17,8 +17,10 @@ logging:
 
 security:
   mode: "transparent"
-  # Only active in defender mode. Limit connection attempts per source IP.
+  # Only active in defender mode. Scope is ip (legacy) or ja4_ip.
+  # A missing JA4 uses IP-only limiting; CIDR exceptions apply to both scopes.
   rate_limit:
+    scope: ja4_ip
     enabled: false
     per_minute: 60
     burst: 20
