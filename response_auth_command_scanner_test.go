@@ -41,3 +41,19 @@ func TestAuthCommandScannerClearsPasswordBuffer(t *testing.T) {
     if len(s.line)!=0 {t.Fatal("line retained")}
     for _,b:=range s.line[:cap(s.line)] {if b!=0 {t.Fatal("temporary buffer not cleared")}}
 }
+
+func TestAuthCommandScannerQuotedBracesAreNotLiterals(t *testing.T) {
+    var s authCommandScanner
+    commands:=s.feed([]byte("A LOGIN alice \"{123}\"\\r\\n"))
+    if s.disabled || len(commands)!=1 || commands[0].Tag!="A" {
+        t.Fatalf("quoted braces misclassified: disabled=%v commands=%v",s.disabled,commands)
+    }
+}
+
+func TestAuthCommandScannerLiteralMarkerAfterSafeCommand(t *testing.T) {
+    var s authCommandScanner
+    commands:=s.feed([]byte("A LOGIN alice pass\\r\\nB LOGIN {4} pass\\r\\n"))
+    if len(commands)!=0 || !s.disabled {
+        t.Fatalf("partial batch should not publish candidates: %v disabled=%v",commands,s.disabled)
+    }
+}
