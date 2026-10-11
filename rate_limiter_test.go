@@ -117,3 +117,32 @@ func TestRateLimiterCapacityDoesNotResetActiveQuotas(t *testing.T) {
         t.Fatal("idle cleanup did not free capacity")
     }
 }
+
+func TestRateLimitModeAndReloadSnapshot(t *testing.T) {
+    now := time.Unix(1000, 0)
+    var limiter ipRateLimiter
+    old := modeConfig(ModeLearning)
+    old.Security.RateLimit = RateLimitConfig{Enabled: true, PerMinute: 60, Burst: 1}
+    // The mode gate must take precedence even if the flag is present.
+    for i:=0;i<3;i++ {
+        if !limiter.allowConnectionRate(old, "192.0.2.1", now) { t.Fatal("learning was limited") }
+    }
+    next := modeConfig(ModeDefender)
+    next.Security.RateLimit = RateLimitConfig{Enabled: true, PerMinute: 60, Burst: 1}
+    ac := &AtomicConfig{}
+    ac.Store(old)
+    ac.Store(next)
+    if !limiter.allowConnectionRate(ac.Load(), "192.0.2.1", now) { t.Fatal("first Defender request denied") }
+    if limiter.allowConnectionRate(ac.Load(), "192.0.2.1", now) { t.Fatal("Defender limit not enforced") }
+    // New sessions pick up new exceptions, while an existing session's
+    // configuration snapshot remains unchanged.
+    withException := *next
+    withException.Security.RateLimit.ExceptCIDRs = []string{"192.0.2.0/24"}
+    ac.Store(&withException)
+    if !limiter.allowConnectionRate(ac.Load(), "192.0.2.1", now) { t.Fatal("reload exception ignored") }
+    if limiter.allowConnectionRate(next, "192.0.2.1", now) { t.Fatal("old snapshot unexpectedly changed") }
+    disabled := *next
+    disabled.Security.RateLimit.Enabled = false
+    if !limiter.allowConnectionRate(&disabled, "192.0.2.1", now) { t.Fatal("disabled limiter enforced") }
+    if !limiter.allowConnectionRate(modeConfig(ModeTransparent), "192.0.2.1", now) { t.Fatal("transparent was limited") }
+}
