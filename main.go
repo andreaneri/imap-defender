@@ -73,6 +73,7 @@ type SecurityConfig struct {
 }
 
 type RateLimitConfig struct {
+	Scope string `yaml:"scope"`
 	Enabled bool `yaml:"enabled"`
 	PerMinute int `yaml:"per_minute"`
 	Burst int `yaml:"burst"`
@@ -157,6 +158,7 @@ func validateConfig(c *Config) error {
 		prefix, err := netip.ParsePrefix(raw)
 		if err != nil || prefix.Addr().Is4In6() || prefix != prefix.Masked() { return fmt.Errorf("security.rate_limit.except_cidrs contains invalid or non-canonical prefix %q", raw) }
 	}
+	if c.Security.RateLimit.Scope != "" && c.Security.RateLimit.Scope != "ip" && c.Security.RateLimit.Scope != "ja4_ip" { return fmt.Errorf("security.rate_limit.scope must be ip or ja4_ip") }
 	if c.Security.RateLimit.Enabled {
 		if c.Security.Mode != ModeDefender { return fmt.Errorf("security.rate_limit requires defender mode") }
 		if c.Security.RateLimit.PerMinute <= 0 || c.Security.RateLimit.Burst <= 0 { return fmt.Errorf("security.rate_limit requires positive per_minute and burst") }
@@ -303,6 +305,15 @@ func (rt *RedisTracker) startAsyncWorker() {
 		cancel()
 		if err != nil {
 			slog.Error("Scrittura pipeline Redis fallita", "error", err)
+		} else if event.ShadowRisk && validAccountOutcome(event) && event.JA4 != "" {
+			// Shadow evaluation is off the relay path. Never delay or deny a client here.
+			signals, readErr := rt.ReadAccountSignals(rt.ctx, event.Username, event.JA4, event.RemoteIP, event.CountryCode)
+			if readErr != nil {
+				slog.Debug("Account shadow lookup failed open", "error", readErr)
+			} else {
+				decision := evaluateAccountRisk(signals, defaultAccountPolicy())
+				slog.Debug("Account shadow decision", "action", decision.Action, "reason", decision.Reason, "delay", decision.Delay, "outcome", event.Outcome, "country", event.CountryCode)
+			}
 		}
 	}
 }
@@ -347,6 +358,7 @@ func queueAuthEvent(ctx context.Context, pipe redis.Pipeliner, event authEvent) 
 		"outcome": event.Outcome, "timestamp": event.Timestamp.Format(time.RFC3339Nano),
 	})
 	pipe.Expire(ctx, key, 7*24*time.Hour)
+	queueAccountReputation(ctx, pipe, event)
 	// Failure counters are derived only from authoritative backend NO/BAD
 	// outcomes with a known authcid. A successful authentication clears the
 	// corresponding per-account/per-source failure streak.
@@ -385,6 +397,7 @@ func (p *IMAPProxy) connectionDecision(ctx context.Context, cfg *Config, ja4, ip
 func (p *IMAPProxy) recordAuthEvent(mode OperatingMode, event authEvent) {
 	logAuthEvent(slog.Default(), event)
 	if mode != ModeTransparent && p.tracker != nil {
+		event.ShadowRisk = mode == ModeDefender
 		p.tracker.TrackEventAsync(event)
 	}
 }
@@ -625,7 +638,7 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	// including its greeting and tagged authentication responses, are relayed.
 	country := p.getCountryCode(remoteAddr)
 	ip, _, _ := net.SplitHostPort(remoteAddr)
-	if !p.rateLimiter.allowConnectionRate(currentCfg, ip, time.Now()) {
+	if !p.rateLimiter.allowConnectionRateWithJA4(currentCfg, ip, ja4Fp, time.Now()) {
 		if p.metrics != nil { p.metrics.rateLimitRejected.Add(1) }
 		slog.Warn("Connection rate limited", "remote_ip", ip)
 		return

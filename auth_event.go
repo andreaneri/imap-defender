@@ -14,6 +14,7 @@ type authEvent struct {
 	RemoteIP    string
 	CountryCode string
 	JA4         string
+	ShadowRisk  bool // Internal worker hint; not persisted.
 }
 
 func newAuthEvent(result authResult, remoteIP, countryCode, ja4 string) authEvent {
