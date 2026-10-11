@@ -43,6 +43,7 @@ func TestJA4IPRateLimitModesAndExceptions(t *testing.T) {
 
 func TestJA4IPRateLimitScopeValidation(t *testing.T) {
     cfg := modeConfig(ModeDefender)
+    cfg.Redis = RedisConfig{Addr:"127.0.0.1:6379", QueueBufferSize:10}
     cfg.Security.RateLimit = RateLimitConfig{Enabled: true, Scope: "unknown", PerMinute: 60, Burst: 1}
     if err:=validateConfig(cfg); err==nil { t.Fatal("invalid scope accepted") }
     cfg.Security.RateLimit.Scope = "ja4_ip"
