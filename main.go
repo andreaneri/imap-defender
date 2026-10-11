@@ -305,6 +305,15 @@ func (rt *RedisTracker) startAsyncWorker() {
 		cancel()
 		if err != nil {
 			slog.Error("Scrittura pipeline Redis fallita", "error", err)
+		} else if event.ShadowRisk && validAccountOutcome(event) && event.JA4 != "" {
+			// Shadow evaluation is off the relay path. Never delay or deny a client here.
+			signals, readErr := rt.ReadAccountSignals(rt.ctx, event.Username, event.JA4, event.RemoteIP, event.CountryCode)
+			if readErr != nil {
+				slog.Debug("Account shadow lookup failed open", "error", readErr)
+			} else {
+				decision := evaluateAccountRisk(signals, defaultAccountPolicy())
+				slog.Debug("Account shadow decision", "action", decision.Action, "reason", decision.Reason, "delay", decision.Delay, "outcome", event.Outcome, "country", event.CountryCode)
+			}
 		}
 	}
 }
@@ -388,6 +397,7 @@ func (p *IMAPProxy) connectionDecision(ctx context.Context, cfg *Config, ja4, ip
 func (p *IMAPProxy) recordAuthEvent(mode OperatingMode, event authEvent) {
 	logAuthEvent(slog.Default(), event)
 	if mode != ModeTransparent && p.tracker != nil {
+		event.ShadowRisk = mode == ModeDefender
 		p.tracker.TrackEventAsync(event)
 	}
 }
