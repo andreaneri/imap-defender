@@ -168,7 +168,7 @@ func TestRateLimiterCapacityCleanupThrottled(t *testing.T) {
     if first.IsZero() { t.Fatal("capacity cleanup not recorded") }
     if l.allow("new-2", 60, 2, now.Add(100*time.Millisecond)) { t.Fatal("new IP admitted") }
     if !l.lastCapacityCleanup.Equal(first) { t.Fatal("capacity cleanup repeated within throttle interval") }
-    if l.allow("new-3", 60, 2, now.Add(2*time.Second)) { t.Fatal("new IP admitted") }
+    if !l.allow("new-3", 60, 2, now.Add(2*time.Second)) { t.Fatal("reclaimed capacity should admit a new IP") }
     if !l.lastCapacityCleanup.After(first) { t.Fatal("capacity cleanup did not resume") }
 }
 
