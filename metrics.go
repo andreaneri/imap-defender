@@ -20,6 +20,7 @@ type proxyMetrics struct {
  connectionsActive atomic.Int64
  decisions [4]atomic.Uint64
  redisDropped atomic.Uint64
+ rateLimitRejected atomic.Uint64
  tarpitMu sync.Mutex
  tarpitBuckets [7]uint64
  tarpitCount uint64
@@ -65,6 +66,9 @@ func (m *proxyMetrics) handler(tracker *RedisTracker) http.Handler {
   for i, action := range [...]string{"ALLOW", "TARPIT_SOFT", "TARPIT_HARD", "DROP"} {
    fmt.Fprintf(&b, "imap_risk_decisions_total{action=%q} %d\n", action, m.decisions[i].Load())
   }
+  fmt.Fprintln(&b, "# HELP imap_rate_limit_rejected_total Connections rejected by the per-IP rate limiter.")
+  fmt.Fprintln(&b, "# TYPE imap_rate_limit_rejected_total counter")
+  fmt.Fprintf(&b, "imap_rate_limit_rejected_total %d\n", m.rateLimitRejected.Load())
   m.tarpitMu.Lock()
   buckets, count, sum := m.tarpitBuckets, m.tarpitCount, m.tarpitSum
   m.tarpitMu.Unlock()
