@@ -29,7 +29,8 @@ func allowedSource(ip string, exceptions []string) bool {
     for _, entry := range exceptions {
         prefix, err := netip.ParsePrefix(entry)
         if err != nil { continue }
-        if prefix.Masked().Contains(addr) { return true }
+        // Canonical IPv4-mapped IPv6 prefixes are rejected at config load.
+        if prefix.Contains(addr) { return true }
     }
     return false
 }
