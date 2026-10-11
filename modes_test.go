@@ -97,10 +97,24 @@ func TestAuthPersistenceFieldsAndTTL(t *testing.T) {
 		}
 		want := 2
 		if outcome == "OK" {
-			want = 3
+			want = 4 // observation, TTL, counter deletion, success signal
+		} else if outcome == "NO" || outcome == "BAD" {
+			want = 4 // observation, TTL, increment, counter TTL
 		}
 		if len(cmds) != want {
 			t.Fatalf("outcome %s created success signal", outcome)
+		}
+		if outcome == "NO" || outcome == "BAD" {
+			if strings.ToLower(fmt.Sprint(cmds[2].Args()[0])) != "incr" || fmt.Sprint(cmds[2].Args()[1]) != accountFailureKey("user", "192.0.2.1") {
+				t.Fatalf("failure counter key/command mismatch: %v", cmds[2].Args())
+			}
+			if strings.ToLower(fmt.Sprint(cmds[3].Args()[0])) != "expire" || cmds[3].Args()[2] != int64(15*60) {
+				t.Fatalf("failure counter TTL mismatch: %v", cmds[3].Args())
+			}
+		} else if outcome == "OK" {
+			if strings.ToLower(fmt.Sprint(cmds[2].Args()[0])) != "del" || fmt.Sprint(cmds[2].Args()[1]) != accountFailureKey("user", "192.0.2.1") {
+				t.Fatalf("success did not clear scoped counter: %v", cmds[2].Args())
+			}
 		}
 	}
 	if signalKey("a:b", "c") == signalKey("a", "b:c") {
