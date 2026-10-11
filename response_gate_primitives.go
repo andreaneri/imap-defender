@@ -25,7 +25,7 @@ const maxPaceResponseLine = 16 * 1024
 // printable IMAP tag, an exact status atom, and no embedded line endings.
 // All unsupported frames fail open, without attempting to reinterpret them.
 func classifyTaggedFailure(line []byte) (responsePaceCandidate, bool) {
-    if len(line) < 7 || len(line) > maxPaceResponseLine ||
+    if len(line) < 6 || len(line) > maxPaceResponseLine ||
         !bytes.HasSuffix(line, []byte("\r\n")) {
         return responsePaceCandidate{}, false
     }
