@@ -2,6 +2,7 @@ package main
 
 import (
     "net/netip"
+    "encoding/json"
     "math"
     "sync"
     "time"
@@ -9,7 +10,7 @@ import (
 
 const maxRateLimitBuckets = 100000
 
-// ipRateLimiter limits connections per source IP. JA4 is not an identity.
+// ipRateLimiter limits connections per configured origin scope. JA4 is not an identity.
 type ipRateLimiter struct {
     mu sync.Mutex
     buckets map[string]ipBucket
@@ -87,6 +88,12 @@ func (l *ipRateLimiter) allow(ip string, rate, burst int, now time.Time) bool {
 // allowConnectionRate applies the session's immutable configuration snapshot.
 // Exceptions never bypass the separate Risk Engine.
 func (l *ipRateLimiter) allowConnectionRate(cfg *Config, ip string, now time.Time) bool {
+    return l.allowConnectionRateWithJA4(cfg, ip, "", now)
+}
+
+// allowConnectionRateWithJA4 keeps the legacy IP scope unless explicitly configured.
+// An unavailable JA4 falls back to IP-only limiting, never to a shared empty-JA4 bucket.
+func (l *ipRateLimiter) allowConnectionRateWithJA4(cfg *Config, ip, ja4 string, now time.Time) bool {
     if cfg.Security.Mode != ModeDefender || !cfg.Security.RateLimit.Enabled {
         return true
     }
@@ -94,5 +101,10 @@ func (l *ipRateLimiter) allowConnectionRate(cfg *Config, ip string, now time.Tim
     if allowedSource(ip, policy.ExceptCIDRs) {
         return true
     }
-    return l.allow(ip, policy.PerMinute, policy.Burst, now)
+    key := ip
+    if policy.Scope == "ja4_ip" && ja4 != "" {
+        encoded, _ := json.Marshal([2]string{ja4, ip})
+        key = string(encoded)
+    }
+    return l.allow(key, policy.PerMinute, policy.Burst, now)
 }
