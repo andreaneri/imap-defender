@@ -79,3 +79,9 @@ An inert `authCommandScanner` recognizes complete, single-line LOGIN commands wi
 ## Command scanner safety refinement
 
 The inert LOGIN scanner now distinguishes a plausible literal marker outside quoted strings from braces inside quoted credentials. It rejects unsupported literal framing without emitting candidates from a partially processed batch. Regression tests were added. This does **not** resolve the registration-versus-forwarding race, SASL exchanges, or complete IMAP framing; it remains intentionally unwired and no account-level enforcement is enabled. Tests have not been run in a compatible Go environment.
+
+## Inert forwarding/completion synchronization
+
+The feature branch adds `authForwardCoordinator`, an isolated, mutex-protected tag state machine with stage-before-write, commit-after-complete-write, and fail-open abort on partial/failed forwarding. A tagged completion racing ahead of the write is retained as status only and classified after commit. It does not retain credentials or response bytes; duplicate tags/completions disable correlation. Concurrent unit tests model both orderings and exactly-once classification.
+
+**Still not an IMAP response gate:** the coordinator is not wired to either `io.Copy` direction. In particular, its post-commit classification cannot retroactively hold a response already forwarded to the client. Actual pacing requires a bounded server-to-client output buffer/gate that waits for safe correlation *before* emitting the affected complete response, preserves unrelated/pipelined bytes, and fails open on ambiguity, timeout or resource exhaustion. The current response scanner is not a complete IMAP parser. Do not activate enforcement based on this coordinator alone. Tests are committed but have not been run.
