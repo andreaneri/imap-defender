@@ -95,27 +95,36 @@ func TestAuthPersistenceFieldsAndTTL(t *testing.T) {
 		if cmds[1].Args()[2] != int64(7*24*60*60) {
 			t.Fatalf("observation TTL: %v", cmds[1].Args())
 		}
-		want := 2
-		if outcome == "OK" {
-			want = 4 // observation, TTL, counter deletion, success signal
-		} else if outcome == "NO" || outcome == "BAD" {
-			want = 4 // observation, TTL, increment, counter TTL
+		// Reputation commands are appended between the observation and the
+		// legacy account/IP counter. Find the latter by its exact key rather
+		// than assuming fixed pipeline offsets.
+		scopedKey := accountFailureKey("user", "192.0.2.1")
+		var scoped []redis.Cmder
+		var successSignals int
+		for _, cmd := range cmds {
+			args := cmd.Args()
+			if len(args) < 2 { continue }
+			key := fmt.Sprint(args[1])
+			if key == scopedKey { scoped = append(scoped, cmd) }
+			if key == signalKey("fp", "192.0.2.1") { successSignals++ }
 		}
-		if len(cmds) != want {
-			t.Fatalf("outcome %s created success signal", outcome)
+		switch outcome {
+		case "NO", "BAD":
+			if len(scoped) != 2 || strings.ToLower(fmt.Sprint(scoped[0].Args()[0])) != "incr" ||
+				strings.ToLower(fmt.Sprint(scoped[1].Args()[0])) != "expire" ||
+				scoped[1].Args()[2] != int64(15*60) || successSignals != 0 {
+				t.Fatalf("invalid scoped failure commands for %s: %v", outcome, scoped)
+			}
+		case "OK":
+			if len(scoped) != 1 || strings.ToLower(fmt.Sprint(scoped[0].Args()[0])) != "del" || successSignals != 1 {
+				t.Fatalf("invalid success commands: scoped=%v signals=%d", scoped, successSignals)
+			}
+		default:
+			if len(scoped) != 0 || successSignals != 0 {
+				t.Fatalf("indeterminate result persisted counters or success: %v", cmds)
+			}
 		}
-		if outcome == "NO" || outcome == "BAD" {
-			if strings.ToLower(fmt.Sprint(cmds[2].Args()[0])) != "incr" || fmt.Sprint(cmds[2].Args()[1]) != accountFailureKey("user", "192.0.2.1") {
-				t.Fatalf("failure counter key/command mismatch: %v", cmds[2].Args())
-			}
-			if strings.ToLower(fmt.Sprint(cmds[3].Args()[0])) != "expire" || cmds[3].Args()[2] != int64(15*60) {
-				t.Fatalf("failure counter TTL mismatch: %v", cmds[3].Args())
-			}
-		} else if outcome == "OK" {
-			if strings.ToLower(fmt.Sprint(cmds[2].Args()[0])) != "del" || fmt.Sprint(cmds[2].Args()[1]) != accountFailureKey("user", "192.0.2.1") {
-				t.Fatalf("success did not clear scoped counter: %v", cmds[2].Args())
-			}
-		}
+
 	}
 	if signalKey("a:b", "c") == signalKey("a", "b:c") {
 		t.Fatal("ambiguous key")
