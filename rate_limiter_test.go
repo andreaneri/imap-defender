@@ -3,6 +3,7 @@ package main
 import (
  "testing"
  "fmt"
+ "math"
  "sync"
  "time"
 )
@@ -145,4 +146,12 @@ func TestRateLimitModeAndReloadSnapshot(t *testing.T) {
     disabled.Security.RateLimit.Enabled = false
     if !limiter.allowConnectionRate(&disabled, "192.0.2.1", now) { t.Fatal("disabled limiter enforced") }
     if !limiter.allowConnectionRate(modeConfig(ModeTransparent), "192.0.2.1", now) { t.Fatal("transparent was limited") }
+}
+
+func TestRateLimiterExtremeParameters(t *testing.T) {
+    var l ipRateLimiter
+    now := time.Unix(1000, 0)
+    if !l.allow("192.0.2.1", 1, math.MaxInt, now) { t.Fatal("large burst denied") }
+    if !l.allow("192.0.2.2", math.MaxInt, 1, now) { t.Fatal("large refill denied") }
+    if l.allow("192.0.2.2", math.MaxInt, 1, now) { t.Fatal("burst exceeded") }
 }
