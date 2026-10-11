@@ -121,3 +121,32 @@ func (rt *RedisTracker) ReadAccountSignals(ctx context.Context, account, ja4, ip
         CountryValid: countryValid,
     }, nil
 }
+
+// effectiveFailurePace converts a shadow risk decision into a bounded
+// delay candidate. It does not authorize holding any IMAP bytes: the caller
+// must first correlate an intact backend NO/BAD to a forwarded auth command.
+// BLOCK_CANDIDATE is intentionally never converted to a synthetic rejection.
+func effectiveFailurePace(decision accountDecision, outcome string, maximum time.Duration) time.Duration {
+    if outcome != "NO" && outcome != "BAD" {
+        return 0
+    }
+    if maximum <= 0 {
+        return 0
+    }
+    if decision.Action != accountPace && decision.Action != accountBlockCandidate {
+        return 0
+    }
+    delay := decision.Delay
+    if decision.Action == accountBlockCandidate {
+        // Blocking requires a separate protocol-safe ADR decision. Until then
+        // candidates are observed only, never converted into a hard denial.
+        return 0
+    }
+    if delay <= 0 {
+        return 0
+    }
+    if delay > maximum {
+        return maximum
+    }
+    return delay
+}
