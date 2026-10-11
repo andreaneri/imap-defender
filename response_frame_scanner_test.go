@@ -59,3 +59,21 @@ func TestResponseFrameScannerMinimalTaggedStatus(t *testing.T) {
     frames:=s.feed([]byte("A NO\r\n"))
     if len(frames)!=1 || !frames[0].IsCandidate {t.Fatalf("frames=%v",frames)}
 }
+
+func TestResponseFrameScannerClearsBufferedLine(t *testing.T) {
+    var s responseFrameScanner
+    s.feed([]byte("A NO private response metadata\r\n"))
+    if s.disabled || len(s.line) != 0 {
+        t.Fatalf("unexpected scanner state: disabled=%v pending=%d", s.disabled, len(s.line))
+    }
+    for _, b := range s.line[:cap(s.line)] {
+        if b != 0 {
+            t.Fatal("completed response bytes remain in reusable buffer")
+        }
+    }
+    s.feed([]byte("B NO partial sensitive text"))
+    s.disable()
+    if s.line != nil || !s.disabled {
+        t.Fatal("disable did not release scanner buffer")
+    }
+}
