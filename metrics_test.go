@@ -15,6 +15,7 @@ func TestMetricsHandler(t *testing.T) {
  m.recordDecision("ALLOW")
  m.recordDecision("DROP")
  m.redisDropped.Add(2)
+ m.rateLimitRejected.Add(4)
  m.observeTarpit(250 * time.Millisecond)
  request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
  response := httptest.NewRecorder()
@@ -30,6 +31,7 @@ func TestMetricsHandler(t *testing.T) {
   "imap_tarpit_duration_seconds_count 1",
   "imap_redis_queue_depth 0",
   "imap_redis_events_dropped_total 2",
+  "imap_rate_limit_rejected_total 4",
  } {
   if !strings.Contains(body, expected) { t.Errorf("missing %q", expected) }
  }
