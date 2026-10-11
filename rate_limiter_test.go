@@ -171,3 +171,16 @@ func TestRateLimiterCapacityCleanupThrottled(t *testing.T) {
     if l.allow("new-3", 60, 2, now.Add(2*time.Second)) { t.Fatal("new IP admitted") }
     if !l.lastCapacityCleanup.After(first) { t.Fatal("capacity cleanup did not resume") }
 }
+
+func TestRateLimitOperationalBounds(t *testing.T) {
+    for _, policy := range []RateLimitConfig{
+        {Enabled: true, PerMinute: 1000001, Burst: 1},
+        {Enabled: true, PerMinute: 1, Burst: 100001},
+    } {
+        cfg := modeConfig(ModeDefender)
+        cfg.Security.RateLimit = policy
+        if err := validateConfig(cfg); err == nil {
+            t.Fatalf("accepted unsafe rate limiter configuration: %+v", policy)
+        }
+    }
+}
