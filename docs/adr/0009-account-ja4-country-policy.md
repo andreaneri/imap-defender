@@ -67,3 +67,7 @@ Shadow reads execute serially in the Redis worker and may reduce event-queue thr
 ## Inert response stream framing increment
 
 A bounded `responseFrameScanner` has been added on the feature branch, with fragmentation, literal-injection and fail-open unit tests. It scans CRLF-terminated physical server lines and skips recognized literal payloads without retaining them. The component is **not wired to the relay**. It does not track commands or authentication tags, and its limited literal-marker recognition is not a complete IMAP grammar: quoted text, extension syntax and ambiguous server frames require further handling before enforcement. It cannot justify delaying any bytes. Tests are committed but not yet executed.
+
+## Inert authentication tag correlation increment
+
+The feature branch now contains `authResponseCorrelator`, a bounded registry of LOGIN/AUTHENTICATE tags with single-use completion handling. An OK consumes the tag without a pacing candidate; NO/BAD produces a candidate only for a registered tag. Duplicate tags, unexpected completions and capacity overflow disable correlation. It does not store credentials or account names. Unit tests cover pipelined tag registration, duplicate/replayed tags, capacity, and invalid outcomes. **This is not wired to the live relay**, and no safe command-registration path or complete server literal framing has yet been established. Therefore it does not authorize actual response delays. All tests remain unexecuted until a compatible Go environment is available.
