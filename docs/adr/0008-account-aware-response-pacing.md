@@ -1,8 +1,10 @@
 # 0008 — Account-aware Defender enforcement at IMAP response boundary
 
 - Date: 2026-10-11
-- Status: Proposed; not implemented
+- Status: Superseded by [ADR 0009](0009-account-ja4-country-policy.md); not implemented
 - Extends: [ADR 0003](0003-backend-authentication-authority.md), [ADR 0004](0004-account-authentication-signals.md), [ADR 0007](0007-account-failure-counters.md)
+
+The account policy and its enforcement scope are replaced by ADR 0009. The protocol-safe response-gate prerequisites below remain relevant.
 
 ## Problem
 
