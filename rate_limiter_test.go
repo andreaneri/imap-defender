@@ -82,3 +82,23 @@ func BenchmarkIPRateLimiterManyIPs(b *testing.B) {
     b.ResetTimer()
     for i:=0;i<b.N;i++ { l.allow(ips[i%len(ips)], 600000, 100, now) }
 }
+
+func TestRateLimitExceptionValidation(t *testing.T) {
+    for _, prefix := range []string{"192.0.2.1/24", "not-a-cidr", "::ffff:192.0.2.1/128"} {
+        c := &Config{
+            Server: ServerConfig{ListenAddr: ":993", BackendIMAPAddr: "localhost:143", CertFile: "cert", KeyFile: "key"},
+            Redis: RedisConfig{Addr: "localhost:6379", QueueBufferSize: 10},
+            Security: SecurityConfig{Mode: ModeDefender, Thresholds: ThresholdConfig{30, 60, 90},
+                RateLimit: RateLimitConfig{Enabled: true, PerMinute: 60, Burst: 10, ExceptCIDRs: []string{prefix}}},
+        }
+        if err := validateConfig(c); err == nil { t.Fatalf("accepted invalid prefix %q", prefix) }
+    }
+}
+func TestRateLimiterFullRefill(t *testing.T) {
+    var l ipRateLimiter
+    start := time.Unix(1000, 0)
+    for i:=0;i<3;i++ { if !l.allow("203.0.113.1", 60, 3, start) { t.Fatal("burst rejected") } }
+    if l.allow("203.0.113.1", 60, 3, start) { t.Fatal("extra token") }
+    for i:=0;i<3;i++ { if !l.allow("203.0.113.1", 60, 3, start.Add(time.Minute)) { t.Fatal("refill incomplete") } }
+    if l.allow("203.0.113.1", 60, 3, start.Add(time.Minute)) { t.Fatal("over-refill") }
+}
