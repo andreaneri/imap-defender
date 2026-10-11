@@ -58,21 +58,21 @@ func TestResponseOutputGateDoesNotRetainConsumedBytes(t *testing.T) {
     gate:=newResponseOutputGate(&dst)
     // A completed line and a partial line in the same write require
     // compaction without retaining the completed response in spare capacity.
-    if _,err:=gate.Write([]byte("A NO denied\\r\\npartial"));err!=nil {t.Fatal(err)}
-    if dst.String()!="A NO denied\\r\\n" {t.Fatalf("unexpected output %q",dst.String())}
+    if _,err:=gate.Write([]byte("A NO denied\r\npartial"));err!=nil {t.Fatal(err)}
+    if dst.String()!="A NO denied\r\n" {t.Fatalf("unexpected output %q",dst.String())}
     if string(gate.pending)!="partial" {t.Fatalf("pending=%q",gate.pending)}
     for _,b:=range gate.pending[len(gate.pending):cap(gate.pending)] {
         if b!=0 {t.Fatal("consumed bytes retained in backing buffer")}
     }
     if err:=gate.Flush();err!=nil {t.Fatal(err)}
-    if dst.String()!="A NO denied\\r\\npartial" {t.Fatal("flush changed byte order")}
+    if dst.String()!="A NO denied\r\npartial" {t.Fatal("flush changed byte order")}
 }
 
 func TestResponseOutputGateCompletedLinesAreImmediate(t *testing.T) {
     var dst bytes.Buffer
     gate:=newResponseOutputGate(&dst)
-    if _,err:=gate.Write([]byte("* OK greeting\\r\\n"));err!=nil {t.Fatal(err)}
-    if dst.String()!="* OK greeting\\r\\n" {t.Fatal("completed greeting withheld")}
-    if _,err:=gate.Write([]byte("+ Ready for literal\\r\\n"));err!=nil {t.Fatal(err)}
-    if dst.String()!="* OK greeting\\r\\n+ Ready for literal\\r\\n" {t.Fatal("continuation withheld")}
+    if _,err:=gate.Write([]byte("* OK greeting\r\n"));err!=nil {t.Fatal(err)}
+    if dst.String()!="* OK greeting\r\n" {t.Fatal("completed greeting withheld")}
+    if _,err:=gate.Write([]byte("+ Ready for literal\r\n"));err!=nil {t.Fatal(err)}
+    if dst.String()!="* OK greeting\r\n+ Ready for literal\r\n" {t.Fatal("continuation withheld")}
 }
