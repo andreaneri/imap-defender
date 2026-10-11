@@ -75,3 +75,7 @@ The feature branch now contains `authResponseCorrelator`, a bounded registry of 
 ## Narrow client command framing (feature branch)
 
 An inert `authCommandScanner` recognizes complete, single-line LOGIN commands with atom or quoted astring arguments, without retaining the credentials after a line is processed. It intentionally excludes AUTHENTICATE/SASL and literal-bearing LOGIN, disables inspection on detected literal syntax, and is **not connected** to the response correlator or live relay. A temporary bounded command buffer exists while assembling a line and is explicitly cleared afterward. This is not a complete IMAP command parser and must not be used for enforcement. Tests cover TCP fragmentation, malformed commands, unsupported literal framing and buffer clearing. A future implementation must register tags only after successful forwarding and ensure server replies cannot race registration; all tests remain unexecuted.
+
+## Command scanner safety refinement
+
+The inert LOGIN scanner now distinguishes a plausible literal marker outside quoted strings from braces inside quoted credentials. It rejects unsupported literal framing without emitting candidates from a partially processed batch. Regression tests were added. This does **not** resolve the registration-versus-forwarding race, SASL exchanges, or complete IMAP framing; it remains intentionally unwired and no account-level enforcement is enabled. Tests have not been run in a compatible Go environment.
