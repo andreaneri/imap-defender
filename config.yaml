@@ -25,6 +25,16 @@ security:
     per_minute: 60
     burst: 20
     except_cidrs: []
+  # Defender-only response completion pacing; ignored in other modes.
+  # Delay includes the bounded Redis lookup. Blocks remain inactive.
+  account_pacing:
+    enabled: false
+    soft_failures: 3
+    hard_failures: 8
+    soft_delay: 250ms
+    hard_delay: 1s
+    max_delay: 1s
+    max_concurrent: 64
   geoip_db_path: "/geoip/GeoLite2-Country.mmdb"
   thresholds:
     tarpit_soft: 30

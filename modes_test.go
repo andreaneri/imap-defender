@@ -232,7 +232,7 @@ func TestNoSecretsInPersistence(t *testing.T) {
 
 // A controlled RESP peer exercises successful Redis lookups without depending
 // on an external service; production Redis interoperability remains a CI concern.
-func testRedisPeer(t *testing.T, exists int) (string, <-chan []string) {
+func testRedisPeer(t *testing.T, exists int, responders ...func([]string) string) (string, <-chan []string) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -306,6 +306,12 @@ func testRedisPeer(t *testing.T, exists int) (string, <-chan []string) {
 						replies = append(replies, reply)
 						io.WriteString(conn, "+QUEUED\r\n")
 						continue
+					}
+					if len(responders) > 0 && verb != "hello" {
+						if reply := responders[0](cmd); reply != "" {
+							io.WriteString(conn, reply)
+							continue
+						}
 					}
 					switch verb {
 					case "hello":
@@ -394,6 +400,7 @@ func TestModesRelayTLSAndRealBackendOutcome(t *testing.T) {
 			}
 			defer listener.Close()
 			cfg := modeConfig(mode)
+			cfg.Security.AccountPacing = testPacingConfig()
 			cfg.Server.BackendIMAPAddr = backend.Addr().String()
 			ac := &AtomicConfig{}
 			ac.Store(cfg)

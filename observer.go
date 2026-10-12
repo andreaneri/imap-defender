@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -19,14 +20,20 @@ type authResult struct {
 }
 
 type authObserver struct {
-	mu       sync.Mutex
-	pending  map[string]*authIdentity
-	callback func(authResult)
-	client   lineObserver
-	server   lineObserver
-	disabled bool
-	saslTag  string
-	current  *authIdentity
+	captured    []authResult
+	capturing   bool
+	callbackMu  sync.Mutex
+	mu          sync.Mutex
+	pending     map[string]*authIdentity
+	callback    func(authResult)
+	client      lineObserver
+	server      lineObserver
+	disabled    bool
+	saslTag     string
+	current     *authIdentity
+	gateEnabled bool
+	gateUnsafe  bool
+	activeTags  map[string]struct{}
 }
 
 // Framing retains only tag and verb. A separate bounded extractor captures
@@ -42,6 +49,7 @@ type lineObserver struct {
 	digits          bool
 	cr              bool
 	inLine          bool
+	registered      bool
 }
 
 const maxObservedTag = 128
@@ -63,7 +71,7 @@ func (o *authObserver) disableLocked() {
 func (o *authObserver) finishLocked() {
 	for tag, identity := range o.pending {
 		delete(o.pending, tag)
-		o.callback(identity.result("INDETERMINATE"))
+		o.emitLocked(identity.result("INDETERMINATE"))
 	}
 	o.saslTag = ""
 	o.current = nil
@@ -71,16 +79,53 @@ func (o *authObserver) finishLocked() {
 
 func (o *authObserver) finish() {
 	o.mu.Lock()
-	defer o.mu.Unlock()
+	o.capturing = true
 	o.finishLocked()
 	o.client = lineObserver{}
 	o.server = lineObserver{}
 	o.disabled = true
+	o.capturing = false
+	results := o.captured
+	o.captured = nil
+	o.mu.Unlock()
+	o.dispatch(results)
+}
+
+func (o *authObserver) dispatch(results []authResult) {
+	o.callbackMu.Lock()
+	defer o.callbackMu.Unlock()
+	for _, result := range results {
+		o.callback(result)
+	}
 }
 
 func (o *authObserver) observe(fromClient bool, chunk []byte) {
+	results := o.capture(fromClient, chunk)
+	o.dispatch(results)
+}
+
+// capture separates framing from persistence and policy. No I/O or timers run
+// under the observer mutex; the gate reads history before publishing this event.
+func (o *authObserver) capture(fromClient bool, chunk []byte) []authResult {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	o.capturing = true
+	o.observeLocked(fromClient, chunk)
+	o.capturing = false
+	results := o.captured
+	o.captured = nil
+	return results
+}
+
+func (o *authObserver) emitLocked(r authResult) {
+	if o.capturing {
+		o.captured = append(o.captured, r)
+	} else {
+		o.callback(r)
+	}
+}
+
+func (o *authObserver) observeLocked(fromClient bool, chunk []byte) {
 	if o.disabled {
 		return
 	}
@@ -89,6 +134,9 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 		state = &o.client
 	}
 	for _, b := range chunk {
+		if o.gateEnabled && state.literal == 0 && (b == 0 || b < 0x20 && b != '\r' && b != '\n') {
+			o.gateUnsafe = true
+		}
 		if state.literal > 0 {
 			state.literal--
 			if fromClient && o.current != nil {
@@ -128,6 +176,9 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 			o.disableLocked()
 			return
 		}
+		if fromClient && !state.inLine && o.saslTag != "" && b == '*' && o.current != nil {
+			o.current.invalid = true // SASL cancellation cannot authorize pacing.
+		}
 		state.inLine = true
 		if b == '\r' {
 			state.cr = true
@@ -144,6 +195,7 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 				state.field++
 				if fromClient && state.field == 2 {
 					o.startAuth(state.tokens)
+					state.registered = true
 					if o.disabled {
 						return
 					}
@@ -180,6 +232,9 @@ func (o *authObserver) observe(fromClient bool, chunk []byte) {
 				state.quoted = false
 			}
 			continue
+		}
+		if !fromClient && b == '"' {
+			o.gateUnsafe = true
 		}
 		if fromClient && b == '"' {
 			state.quoted = true
@@ -226,7 +281,24 @@ func (o *authObserver) startAuth(tokens [2][]byte) {
 	tag := string(tokens[0])
 	verb := strings.ToUpper(string(tokens[1]))
 	if !validObservedTag(tag) {
+		if o.gateEnabled {
+			o.gateUnsafe = true
+		}
 		return
+	}
+	if o.gateEnabled {
+		if o.activeTags == nil {
+			o.activeTags = make(map[string]struct{})
+		}
+		if _, duplicate := o.activeTags[tag]; duplicate || len(o.activeTags) >= maxPendingAuth {
+			o.gateUnsafe = true
+		}
+		if !o.gateUnsafe {
+			o.activeTags[tag] = struct{}{}
+		}
+		if verb == "COMPRESS" || verb == "STARTTLS" {
+			o.gateUnsafe = true
+		}
 	}
 	if _, exists := o.pending[tag]; exists {
 		o.disableLocked()
@@ -266,15 +338,24 @@ func (o *authObserver) observeHeader(fromClient bool, tokens [2][]byte) {
 		return
 	}
 	if fromClient {
-		if o.current == nil && (verb == "LOGIN" || verb == "AUTHENTICATE") {
+		if !o.client.registered {
 			o.startAuth(tokens)
 		}
 		if verb == "AUTHENTICATE" {
+			if o.current != nil && !strings.EqualFold(string(o.current.mechanism), "PLAIN") && !strings.EqualFold(string(o.current.mechanism), "LOGIN") {
+				o.gateUnsafe = true
+			}
 			o.saslTag = tag
 		}
 		return
 	}
 
+	if o.gateEnabled && (verb == "OK" || verb == "NO" || verb == "BAD") {
+		if _, found := o.activeTags[tag]; !found {
+			o.gateUnsafe = true
+		}
+		delete(o.activeTags, tag)
+	}
 	identity, found := o.pending[tag]
 	if !found || (verb != "OK" && verb != "NO" && verb != "BAD") {
 		return
@@ -288,7 +369,7 @@ func (o *authObserver) observeHeader(fromClient bool, tokens [2][]byte) {
 		o.saslTag = ""
 	}
 
-	o.callback(identity.result(verb))
+	o.emitLocked(identity.result(verb))
 	if saslPartial || o.client.literal > 0 || o.client.continuation {
 		o.disableLocked()
 	}
@@ -310,7 +391,13 @@ func (w observingWriter) Write(p []byte) (int, error) {
 
 // relayObserved forwards bytes unchanged. The observer cannot fail the relay.
 func relayObserved(client, backend net.Conn, obs *authObserver) error {
+	return relayObservedContext(context.Background(), client, backend, obs)
+}
+
+func relayObservedContext(ctx context.Context, client, backend net.Conn, obs *authObserver) error {
 	defer obs.finish()
+	stop := context.AfterFunc(ctx, func() { _ = client.Close(); _ = backend.Close() })
+	defer stop()
 	errs := make(chan error, 2)
 	copyOne := func(dst, src net.Conn, fromClient bool) {
 		_, err := io.Copy(observingWriter{target: dst, obs: obs, client: fromClient}, src)

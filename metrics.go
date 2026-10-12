@@ -16,6 +16,9 @@ import (
 // proxyMetrics exposes bounded-cardinality Prometheus text metrics.
 // No client identifiers or account names are used as labels.
 type proxyMetrics struct {
+ accountPaceDelayed atomic.Uint64
+ accountPaceBypassed atomic.Uint64
+ accountPaceActive atomic.Int64
  connectionsTotal atomic.Uint64
  connectionsActive atomic.Int64
  decisions [4]atomic.Uint64
@@ -80,6 +83,15 @@ func (m *proxyMetrics) handler(tracker *RedisTracker) http.Handler {
   fmt.Fprintf(&b, "imap_tarpit_duration_seconds_bucket{le=\"+Inf\"} %d\n", count)
   fmt.Fprintf(&b, "imap_tarpit_duration_seconds_sum %g\n", sum)
   fmt.Fprintf(&b, "imap_tarpit_duration_seconds_count %d\n", count)
+  fmt.Fprintln(&b, "# HELP imap_account_pace_delayed_total Backend authentication completions entering a bounded pacing timer.")
+  fmt.Fprintln(&b, "# TYPE imap_account_pace_delayed_total counter")
+  fmt.Fprintf(&b, "imap_account_pace_delayed_total %d\n", m.accountPaceDelayed.Load())
+  fmt.Fprintln(&b, "# HELP imap_account_pace_bypassed_total Eligible completions bypassed for lookup failure or exhausted capacity.")
+  fmt.Fprintln(&b, "# TYPE imap_account_pace_bypassed_total counter")
+  fmt.Fprintf(&b, "imap_account_pace_bypassed_total %d\n", m.accountPaceBypassed.Load())
+  fmt.Fprintln(&b, "# HELP imap_account_pace_active Backend authentication completions currently held by a pacing timer.")
+  fmt.Fprintln(&b, "# TYPE imap_account_pace_active gauge")
+  fmt.Fprintf(&b, "imap_account_pace_active %d\n", m.accountPaceActive.Load())
   depth := 0
   if tracker != nil { depth = len(tracker.eventQueue) }
   fmt.Fprintln(&b, "# HELP imap_redis_queue_depth Pending asynchronous Redis events.")
