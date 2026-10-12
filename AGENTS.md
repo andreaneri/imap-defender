@@ -19,7 +19,7 @@ Proteggere il backend IMAP da attacchi automatizzati mantenendo la compatibilit�
 - **Learning**: osserva traffico ed esiti reali delle autenticazioni e popola Redis, senza applicare contromisure basate sulle classificazioni.
 - **Defender**: usa i segnali raccolti per applicare rate limiting, rallentamento, blocco ed eccezioni configurabili, con decisioni motivabili.
 
-La selezione `security.mode`, Transparent, Learning e il gating del Risk Engine in Defender sono implementati. Rate limiting per IP ed eccezioni CIDR Defender sono implementati nella PR #8; la validazione locale è differita. Le politiche di enforcement per account sono un TODO separato. Il campo obsoleto `security.deep_inspection_mode` viene rifiutato: vedere [ADR 0005](docs/adr/0005-mode-runtime-and-learning.md) per migrazione, default, Redis e reload.
+La selezione `security.mode`, Transparent, Learning e il gating del Risk Engine in Defender sono implementati. Rate limiting per IP ed eccezioni CIDR Defender sono implementati nella PR #8; la validazione locale è differita. Il pacing account-aware delle risposte negative è implementato opt-in nella PR #10; i blocchi per account restano un TODO separato (ADR 0009). Il campo obsoleto `security.deep_inspection_mode` viene rifiutato: vedere [ADR 0005](docs/adr/0005-mode-runtime-and-learning.md) per migrazione, default, Redis e reload.
 
 ## Principi tecnici
 
@@ -75,3 +75,4 @@ Non dichiarare test, commit, push o modifiche eseguiti senza verifica. Riportare
 ## Comunicazione
 
 Rispondere in italiano; mantenere identificatori, nuovi commenti nel codice e messaggi di commit in inglese. Spiegare risultato, verifiche e limiti concreti; distinguere ciò che è implementato da ciò che è pianificato.
+

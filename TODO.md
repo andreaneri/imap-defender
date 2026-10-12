@@ -114,6 +114,9 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
   - [x] Implementare Transparent senza mitigazioni e Learning con eventi reali e TTL Redis; selezionare solo in Defender tarpit/DROP del Risk Engine.
   - [x] Implementare rate limiting per IP e eccezioni CIDR in Defender (PR #8, ADR 0006; validazione locale differita).
   - [x] Aggiungere contatori Redis per esiti NO/BAD per coppia username dichiarata/IP con TTL 15 minuti (ADR 0007; verifica integrazione differita).
-  - [ ] **Account-aware enforcement (fuori dallo scope della PR #8)**: completare la politica secondo ADR 0009 (che sostituisce ADR 0008), senza alterare risposte backend e senza whitelist globale JA4. Il motore shadow e i componenti di framing sono presenti, ma il pacing non è collegato al relay. Priorità: completare e verificare l'enforcement prima del collaudo integrato con Dovecot/Redis.
+  - [x] **Pacing account-aware delle risposte negative (PR #10)**: relay Defender opt-in secondo ADR 0009, LOGIN atom/quoted/literal e SASL PLAIN/LOGIN, correlazione tagged, inoltro invariato, fail-open, budget Redis/timer, limiti di memoria e capacità. Test unitari, integrazione TLS/peer RESP, half-close, errori di scrittura e stress con race detector superati; dettagli in [account-response-pacing.md](docs/account-response-pacing.md).
+  - [ ] **Blocchi account/JA4/country**: specificare in un ADR il meccanismo compatibile con l'autorità del backend, soglie e TTL fissi prima di qualsiasi implementazione. BLOCK_CANDIDATE resta solo shadow; nessuna chiusura o risposta sintetica per account.
+  - [ ] **Collaudo del pacing con Redis/Dovecot reali**: verificare compatibilità dei client e Redis sotto carico prima dell'attivazione in produzione; nell'ambiente di sviluppo mancano binari e immagini locali, con egress vietato.
   - [x] Aggiungere test di relay TLS, concorrenza della coda, timeout/cancellazione Redis e comportamento per modalità con backend e peer RESP controllati.
   - [ ] Collaudare le modalità con Redis e Dovecot reali.
+

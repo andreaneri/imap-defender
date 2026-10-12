@@ -1,7 +1,7 @@
 # 0008 — Account-aware Defender enforcement at IMAP response boundary
 
 - Date: 2026-10-11
-- Status: Superseded by [ADR 0009](0009-account-ja4-country-policy.md); not implemented
+- Status: Superseded by [ADR 0009](0009-account-ja4-country-policy.md); response pacing implemented in PR #10 within ADR 0009 scope
 - Extends: [ADR 0003](0003-backend-authentication-authority.md), [ADR 0004](0004-account-authentication-signals.md), [ADR 0007](0007-account-failure-counters.md)
 
 The account policy and its enforcement scope are replaced by ADR 0009. The protocol-safe response-gate prerequisites below remain relevant.
@@ -24,3 +24,7 @@ The policy should use an exact declared authcid plus directly connected peer IP,
 4. Confirm that backend NO/BAD semantics are retained and that legitimate shared-IP clients are not globally penalized.
 
 Until these prerequisites are met, ADR 0007 counters are telemetry only. The per-IP admission rate limiter of ADR 0006 is the only newly implemented rate enforcement in PR #8.
+
+## Implementation update (PR #10)
+
+The bounded response-completion gate and Defender opt-in are now connected and locally validated. See [ADR 0009](0009-account-ja4-country-policy.md) and [runtime guide](../account-response-pacing.md). Account-specific blocking remains unspecified and inactive.

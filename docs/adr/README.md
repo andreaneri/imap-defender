@@ -12,6 +12,6 @@ Gli ADR registrano decisioni durature, contesto e conseguenze. Lo stato **Accett
 | [0006](0006-defender-ip-rate-limiting.md) | Token bucket per IP ed eccezioni CIDR in Defender | Proposto; implementato nella PR #8, collaudo locale differito |
 | [0007](0007-account-failure-counters.md) | Contatori Redis per fallimenti di autenticazione username/IP | Proposto; implementato nella PR #8, enforcement per account ancora aperto |
 | [0008](0008-account-aware-response-pacing.md) | Confine protocol-aware per enforcement account senza alterare risposte IMAP | Sostituito da ADR 0009; vincoli di protocollo conservati |
-| [0009](0009-account-ja4-country-policy.md) | Defender adattivo: L1 JA4/IP, L2 account e blocco temporaneo account/JA4/country | Proposto; non implementato |
+| [0009](0009-account-ja4-country-policy.md) | Defender adattivo: L1 JA4/IP, L2 account e blocco temporaneo account/JA4/country | Proposto; L1 e pacing L2 opt-in implementati nella PR #10; blocchi inattivi |
 
 Per una nuova decisione copiare [template.md](template.md) in un file numerato con nome descrittivo. Usare gli stati Proposto, Accettato, Rifiutato o Sostituito. Quando cambia una decisione, aggiungere un nuovo ADR e aggiornare il precedente con un collegamento alla sostituzione.
