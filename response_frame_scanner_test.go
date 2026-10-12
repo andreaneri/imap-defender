@@ -77,3 +77,35 @@ func TestResponseFrameScannerClearsBufferedLine(t *testing.T) {
         t.Fatal("disable did not release scanner buffer")
     }
 }
+
+func TestResponseFrameScannerLiteralContinuationCannotForgeTaggedFailure(t *testing.T) {
+    // The literal ends immediately before a fake tagged status. Those bytes
+    // still belong to the enclosing FETCH response, not to LOGIN.
+    stream := "* 1 FETCH (BODY[] {3}\r\nxyzA NO forged\r\n)\r\nB NO real\r\n"
+    for _, size := range []int{1, 2, 3, 7, 4096} {
+        var scanner responseFrameScanner
+        var tags []string
+        for i := 0; i < len(stream); i += size {
+            end := i + size
+            if end > len(stream) { end = len(stream) }
+            for _, frame := range scanner.feed([]byte(stream[i:end])) {
+                if frame.IsCandidate { tags = append(tags, frame.Candidate.Tag) }
+            }
+        }
+        if scanner.disabled || strings.Join(tags, ",") != "B" {
+            t.Fatalf("chunk=%d tags=%v disabled=%v", size, tags, scanner.disabled)
+        }
+    }
+}
+
+func TestResponseFrameScannerChainedLiteralContinuation(t *testing.T) {
+    stream := "* 1 FETCH (BODY[] {3}\r\nxyz {2}\r\nabA NO forged\r\n)\r\nB BAD real\r\n"
+    var scanner responseFrameScanner
+    var tags []string
+    for _, frame := range scanner.feed([]byte(stream)) {
+        if frame.IsCandidate { tags = append(tags, frame.Candidate.Tag) }
+    }
+    if scanner.disabled || strings.Join(tags, ",") != "B" {
+        t.Fatalf("tags=%v disabled=%v", tags, scanner.disabled)
+    }
+}
