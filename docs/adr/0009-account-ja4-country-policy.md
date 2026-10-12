@@ -101,3 +101,7 @@ Before wiring it to live traffic, require a test harness demonstrating byte-for-
 ## Local bidirectional transport simulation
 
 `response_output_gate_pipe_test.go` now exercises a two-direction `net.Pipe` relay with fragmented IMAP greeting, LOGIN/NO and NOOP/OK traffic. It checks exact command and response bytes and relay shutdown; a separate regression test makes the incomplete-line latency cost explicit. This is an isolated transport simulation, **not** an integration test against Dovecot, Redis or real TLS clients. The output gate remains disconnected from production. Tests are committed but not yet run: the available execution environment has Go 1.23.2 versus the module's Go 1.24.4 requirement, and direct GitHub checkout is unavailable in that environment. The next validation step is a Go 1.24.4+ runner executing `go test ./...` and `go test -race ./...` before any gate integration.
+
+## Server literal continuation hardening (PR #10)
+
+The inert `responseFrameScanner` now suppresses tagged failure classification on physical lines that continue an enclosing server literal response. A literal payload ending immediately before text resembling `A NO` must not be interpreted as an authoritative tagged authentication completion. Consecutive literal segments are handled conservatively. Fragmentation and chained-literal regression tests were added. This does not establish complete IMAP grammar coverage and does not enable response pacing. The live relay remains unchanged.
