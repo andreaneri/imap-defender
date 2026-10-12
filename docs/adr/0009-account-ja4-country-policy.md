@@ -121,4 +121,3 @@ Before wiring it to live traffic, require a test harness demonstrating byte-for-
 ## Server literal continuation hardening (PR #10)
 
 The inert `responseFrameScanner` now suppresses tagged failure classification on physical lines that continue an enclosing server literal response. A literal payload ending immediately before text resembling `A NO` must not be interpreted as an authoritative tagged authentication completion. Consecutive literal segments are handled conservatively. Fragmentation and chained-literal regression tests were added. This does not establish complete IMAP grammar coverage and does not enable response pacing. The live relay remains unchanged.
-

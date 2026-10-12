@@ -119,4 +119,3 @@ Questo documento traccia le attività rimanenti per portare l'applicazione da pr
   - [ ] **Collaudo del pacing con Redis/Dovecot reali**: verificare compatibilità dei client e Redis sotto carico prima dell'attivazione in produzione; nell'ambiente di sviluppo mancano binari e immagini locali, con egress vietato.
   - [x] Aggiungere test di relay TLS, concorrenza della coda, timeout/cancellazione Redis e comportamento per modalità con backend e peer RESP controllati.
   - [ ] Collaudare le modalità con Redis e Dovecot reali.
-

@@ -75,4 +75,3 @@ Non dichiarare test, commit, push o modifiche eseguiti senza verifica. Riportare
 ## Comunicazione
 
 Rispondere in italiano; mantenere identificatori, nuovi commenti nel codice e messaggi di commit in inglese. Spiegare risultato, verifiche e limiti concreti; distinguere ciò che è implementato da ciò che è pianificato.
-
