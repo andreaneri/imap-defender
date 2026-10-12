@@ -59,3 +59,53 @@ func TestResponseFrameScannerMinimalTaggedStatus(t *testing.T) {
     frames:=s.feed([]byte("A NO\r\n"))
     if len(frames)!=1 || !frames[0].IsCandidate {t.Fatalf("frames=%v",frames)}
 }
+
+func TestResponseFrameScannerClearsBufferedLine(t *testing.T) {
+    var s responseFrameScanner
+    s.feed([]byte("A NO private response metadata\r\n"))
+    if s.disabled || len(s.line) != 0 {
+        t.Fatalf("unexpected scanner state: disabled=%v pending=%d", s.disabled, len(s.line))
+    }
+    for _, b := range s.line[:cap(s.line)] {
+        if b != 0 {
+            t.Fatal("completed response bytes remain in reusable buffer")
+        }
+    }
+    s.feed([]byte("B NO partial sensitive text"))
+    s.disable()
+    if s.line != nil || !s.disabled {
+        t.Fatal("disable did not release scanner buffer")
+    }
+}
+
+func TestResponseFrameScannerLiteralContinuationCannotForgeTaggedFailure(t *testing.T) {
+    // The literal ends immediately before a fake tagged status. Those bytes
+    // still belong to the enclosing FETCH response, not to LOGIN.
+    stream := "* 1 FETCH (BODY[] {3}\r\nxyzA NO forged\r\n)\r\nB NO real\r\n"
+    for _, size := range []int{1, 2, 3, 7, 4096} {
+        var scanner responseFrameScanner
+        var tags []string
+        for i := 0; i < len(stream); i += size {
+            end := i + size
+            if end > len(stream) { end = len(stream) }
+            for _, frame := range scanner.feed([]byte(stream[i:end])) {
+                if frame.IsCandidate { tags = append(tags, frame.Candidate.Tag) }
+            }
+        }
+        if scanner.disabled || strings.Join(tags, ",") != "B" {
+            t.Fatalf("chunk=%d tags=%v disabled=%v", size, tags, scanner.disabled)
+        }
+    }
+}
+
+func TestResponseFrameScannerChainedLiteralContinuation(t *testing.T) {
+    stream := "* 1 FETCH (BODY[] {3}\r\nxyz {2}\r\nabA NO forged\r\n)\r\nB BAD real\r\n"
+    var scanner responseFrameScanner
+    var tags []string
+    for _, frame := range scanner.feed([]byte(stream)) {
+        if frame.IsCandidate { tags = append(tags, frame.Candidate.Tag) }
+    }
+    if scanner.disabled || strings.Join(tags, ",") != "B" {
+        t.Fatalf("tags=%v disabled=%v", tags, scanner.disabled)
+    }
+}

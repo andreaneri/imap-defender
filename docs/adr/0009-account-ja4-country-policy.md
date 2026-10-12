@@ -1,7 +1,7 @@
 # 0009 — Account/JA4/country adaptive enforcement policy
 
 - Date: 2026-10-11
-- Status: Proposed; L1 JA4/IP opt-in and L2 Redis telemetry implemented on feature branch; enforcement not implemented
+- Status: Proposed; L1 JA4/IP opt-in and L2 response pacing implemented in PR #10; country blocks unspecified and inactive
 - Supersedes: [ADR 0008](0008-account-aware-response-pacing.md) for the account-aware policy; retains its protocol-safety requirements
 - Extends: [ADR 0003](0003-backend-authentication-authority.md), [ADR 0004](0004-account-authentication-signals.md), [ADR 0007](0007-account-failure-counters.md)
 
@@ -43,6 +43,22 @@ Test unknown account first OK/NO, same and changed JA4/IP, changing country, sha
 ## Consequences
 
 The policy reduces country-crossing collateral damage but cannot prevent false positives for two clients sharing account, JA4 and country. GeoIP can be inaccurate or evaded. The previous IP-only rate limiter and username/IP failure counter remain current runtime behavior until separately migrated; this ADR must not be described as implemented.
+
+## Current implementation (PR #10, 2026-10-12)
+
+Defender response pacing is opt-in, disabled by default, and uses exact declared authcid with JA4/direct IP historical signals. UNKNOWN is allowed; an account's current outcome is not enqueued until after its historical lookup. A known origin without a recorded success receives soft pacing on a genuine NO/BAD; historical account/JA4 failures at configured soft/hard thresholds escalate pacing. Success responses never invoke L2 lookup or pacing. Country does not activate a block or exempt repeated failures. The shadow BLOCK_CANDIDATE remains diagnostic; no runtime block or block TTL is created.
+
+The gate streams all bytes immediately except the final LF of an eligible authentication completion. A line-oriented IMAP client receives the complete tagged response only when that LF is delivered. This implements delayed completion without buffering credentials, whole responses, greetings or continuations. Bytes and response order are unchanged. It deliberately does not promise to hide a negative response prefix from clients that expose partial reads.
+
+All client command tags are tracked, bounded to 64. Pending pipelines, subsequent backend bytes, new client activity, EOF, failed/in-flight forwarding, parser ambiguity, SASL cancellation, unknown identity, capacity exhaustion and Redis errors release or bypass pacing. Server literal payloads and their continuation lines cannot forge tagged completions, including zero-length literals. COMPRESS, STARTTLS and unsupported SASL mechanisms permanently bypass the gate because transformed stream framing is unavailable; quoting in server text conservatively bypasses it too. Plain LOGIN/SASL continuations, fragmented CRLF, untagged responses and buffered read suffixes are forwarded immediately. The previously inert line-buffering writer and narrow scanners remain disconnected.
+
+Defaults are soft/hard failure counts 3/8, delays 250 ms/1 s, maximum 1 s and 64 concurrent lookups/timers per process. Config fields and hard bounds are documented in the [runtime guide](../account-response-pacing.md). The maximum delay budget includes lookup time; the Redis budget is min(200 ms, maximum). No timer or lookup runs under observer locks. The global capacity slot survives cancellation until the lookup worker has exited, bounding goroutines as well as timers. Policy configuration is snapshotted per session and may be reloaded for future sessions.
+
+Local verification passed with Go 1.24.4: unit tests, TLS/controlled IMAP and RESP integration, race detector, 20 repeated concurrency/protocol runs, host/Linux builds, vet and benchmarks. Real Redis/Dovecot and production-client validation remain open: no binaries/cached images are available and the environment's network policy prevents fetching them. The final-LF technique and conservative pipeline bypass reduce collateral latency but make pacing best-effort; pipelining can bypass L2 and L1 remains an independent control. Provisionally chosen thresholds are not production-approved. Country-scoped block mechanism, thresholds and fixed TTL still require a separate decision; this PR implements no blocking action.
+
+## Historical development notes
+
+The notes below record earlier, disconnected increments. Statements that a gate was unwired or tests had not run describe those earlier snapshots, not the current implementation above.
 
 ## Incremental implementation (feature branch)
 
@@ -101,3 +117,7 @@ Before wiring it to live traffic, require a test harness demonstrating byte-for-
 ## Local bidirectional transport simulation
 
 `response_output_gate_pipe_test.go` now exercises a two-direction `net.Pipe` relay with fragmented IMAP greeting, LOGIN/NO and NOOP/OK traffic. It checks exact command and response bytes and relay shutdown; a separate regression test makes the incomplete-line latency cost explicit. This is an isolated transport simulation, **not** an integration test against Dovecot, Redis or real TLS clients. The output gate remains disconnected from production. Tests are committed but not yet run: the available execution environment has Go 1.23.2 versus the module's Go 1.24.4 requirement, and direct GitHub checkout is unavailable in that environment. The next validation step is a Go 1.24.4+ runner executing `go test ./...` and `go test -race ./...` before any gate integration.
+
+## Server literal continuation hardening (PR #10)
+
+The inert `responseFrameScanner` now suppresses tagged failure classification on physical lines that continue an enclosing server literal response. A literal payload ending immediately before text resembling `A NO` must not be interpreted as an authoritative tagged authentication completion. Consecutive literal segments are handled conservatively. Fragmentation and chained-literal regression tests were added. This does not establish complete IMAP grammar coverage and does not enable response pacing. The live relay remains unchanged.

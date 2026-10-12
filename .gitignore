@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
@@ -31,7 +30,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
-=======
 # Local TLS test certificates
 /cert.pem
 /key.pem
@@ -43,4 +41,6 @@ go.work.sum
 # Local build artifacts
 /imap-ja4-proxy-local
 /imap-ja4-proxy-linux
->>>>>>> 11b4744 (feat: initialize IMAP proxy implementation)
+
+# Session scratch files
+/work/

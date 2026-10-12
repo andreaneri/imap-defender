@@ -70,6 +70,7 @@ type SecurityConfig struct {
 	Thresholds           ThresholdConfig `yaml:"thresholds"`
 	Weights              WeightConfig    `yaml:"weights"`
 	RateLimit            RateLimitConfig `yaml:"rate_limit"`
+	AccountPacing        AccountPacingConfig `yaml:"account_pacing"`
 }
 
 type RateLimitConfig struct {
@@ -163,6 +164,9 @@ func validateConfig(c *Config) error {
 		if c.Security.Mode != ModeDefender { return fmt.Errorf("security.rate_limit requires defender mode") }
 		if c.Security.RateLimit.PerMinute <= 0 || c.Security.RateLimit.Burst <= 0 { return fmt.Errorf("security.rate_limit requires positive per_minute and burst") }
 		if c.Security.RateLimit.Burst > 100000 || c.Security.RateLimit.PerMinute > 1000000 { return fmt.Errorf("security.rate_limit burst must be <= 100000 and per_minute <= 1000000") }
+	}
+	if err := validateAccountPacing(c.Security.AccountPacing); err != nil {
+		return err
 	}
 	t := c.Security.Thresholds
 	if t.TarpitSoft <= 0 || t.TarpitSoft >= t.TarpitHard || t.TarpitHard >= t.Drop || t.Drop > 100 {
@@ -454,6 +458,7 @@ type IMAPProxy struct {
 	atomicCfg    *AtomicConfig
 	metrics *proxyMetrics
 	rateLimiter ipRateLimiter
+	accountPacer accountPaceLimiter
 }
 
 func NewIMAPProxy(atomicCfg *AtomicConfig, tracker *RedisTracker) (*IMAPProxy, error) {
@@ -671,7 +676,17 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	observer := newAuthObserver(func(result authResult) {
 		p.recordAuthEvent(currentCfg.Security.Mode, newAuthEvent(result, remoteAddr, country, ja4Fp))
 	})
-	if err := relayObserved(tlsConn, backendConn, observer); err != nil {
+	var relayErr error
+	if currentCfg.Security.Mode == ModeDefender && currentCfg.Security.AccountPacing.Enabled {
+		gate := &accountResponsePacer{config: currentCfg.Security.AccountPacing, limiter: &p.accountPacer, metrics: p.metrics}
+		gate.lookup = func(readCtx context.Context, result authResult) (accountSignals, error) {
+			return p.tracker.ReadAccountSignals(readCtx, result.Username, ja4Fp, ip, country)
+		}
+		relayErr = relayAccountPaced(ctx, tlsConn, backendConn, observer, gate)
+	} else {
+		relayErr = relayObservedContext(ctx, tlsConn, backendConn, observer)
+	}
+	if err := relayErr; err != nil {
 		slog.Debug("IMAP relay finished", "remote_ip", remoteAddr, "error", err)
 	}
 }

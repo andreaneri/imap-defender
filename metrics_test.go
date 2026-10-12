@@ -10,6 +10,9 @@ import (
 
 func TestMetricsHandler(t *testing.T) {
  m := &proxyMetrics{}
+ m.accountPaceDelayed.Add(2)
+ m.accountPaceBypassed.Add(1)
+ m.accountPaceActive.Add(1)
  m.connectionsTotal.Add(3)
  m.connectionsActive.Add(1)
  m.recordDecision("ALLOW")
@@ -23,7 +26,10 @@ func TestMetricsHandler(t *testing.T) {
  if response.Code != http.StatusOK { t.Fatalf("status = %d", response.Code) }
  body := response.Body.String()
  for _, expected := range []string{
-  "imap_connections_total 3",
+  "imap_account_pace_delayed_total 2",
+ "imap_account_pace_bypassed_total 1",
+ "imap_account_pace_active 1",
+ "imap_connections_total 3",
   "imap_connections_active 1",
   "imap_risk_decisions_total{action=\"ALLOW\"} 1",
   "imap_risk_decisions_total{action=\"DROP\"} 1",

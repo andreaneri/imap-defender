@@ -11,6 +11,7 @@ import (
 type responseFrameScanner struct {
     line []byte
     literal uint64
+    continuation bool
     disabled bool
 }
 
@@ -40,7 +41,12 @@ func (s *responseFrameScanner) feed(chunk []byte) []responseFrame {
             s.disable()
             return nil
         }
-        candidate, ok := classifyTaggedFailure(s.line)
+        // A line following a server literal may be a continuation of the
+        // enclosing response, not a new tagged completion. Never classify it.
+        candidate, ok := responsePaceCandidate{}, false
+        if !s.continuation {
+            candidate, ok = classifyTaggedFailure(s.line)
+        }
         frames = append(frames, responseFrame{Candidate: candidate, IsCandidate: ok})
         literal, valid := trailingServerLiteral(s.line)
         if !valid {
@@ -48,6 +54,10 @@ func (s *responseFrameScanner) feed(chunk []byte) []responseFrame {
             return nil
         }
         s.literal = literal
+        s.continuation = literal > 0
+        // Clear the previous physical line before reusing the backing buffer.
+        // Server responses may contain sensitive mailbox metadata.
+        clear(s.line)
         s.line = s.line[:0]
     }
     return frames
@@ -56,6 +66,8 @@ func (s *responseFrameScanner) feed(chunk []byte) []responseFrame {
 func (s *responseFrameScanner) disable() {
     s.disabled = true
     s.literal = 0
+    s.continuation = false
+    clear(s.line)
     s.line = nil
 }
 

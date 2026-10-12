@@ -12,7 +12,7 @@
 
 In modalità `defender`, `security.rate_limit.enabled: true` attiva un token bucket locale per IP sorgente dopo l’handshake TLS e prima del dial del backend IMAP. `per_minute` controlla il refill e `burst` la capacità. `except_cidrs` elenca reti canoniche esentate **solo** dal rate limiter, non dal Risk Engine. Il default è disabilitato; Transparent e Learning non applicano il limite. Il limite è per processo, non distribuito, e può penalizzare utenti dietro NAT condiviso. La saturazione della tabella di 100.000 bucket rifiuta nuovi IP finché non si libera spazio. Le connessioni respinte sono conteggiate separatamente in `imap_rate_limit_rejected_total`; `imap_risk_decisions_total` riguarda soltanto il Risk Engine. Vedere [ADR 0006](adr/0006-defender-ip-rate-limiting.md).
 
-I contatori Redis username/IP sono telemetria (ADR 0007); l’enforcement per account è fuori scope della PR #8 (ADR 0008). Il collaudo locale Dovecot/Redis rimane differito.
+I contatori Redis username/IP restano telemetria (ADR 0007). La PR #10 aggiunge il pacing opt-in Defender dei completamenti negativi secondo ADR 0009, senza implementare blocchi per account. Vedere [account-response-pacing.md](account-response-pacing.md) per configurazione, fail-open, metriche, verifiche e limiti. Il collaudo Dovecot/Redis reali rimane differito.
 
 ## Indice dei Contenuti
 1. [Visione Generale dell'Architettura](#1-visione-generale-dellarchitettura)
