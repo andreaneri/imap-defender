@@ -64,13 +64,14 @@ const (
 )
 
 type SecurityConfig struct {
-	Mode                 OperatingMode   `yaml:"mode"`
-	LegacyDeepInspection *bool           `yaml:"deep_inspection_mode"`
-	GeoIPDBPath          string          `yaml:"geoip_db_path"`
-	Thresholds           ThresholdConfig `yaml:"thresholds"`
-	Weights              WeightConfig    `yaml:"weights"`
-	RateLimit            RateLimitConfig `yaml:"rate_limit"`
-	AccountPacing        AccountPacingConfig `yaml:"account_pacing"`
+	Mode                 OperatingMode        `yaml:"mode"`
+	LegacyDeepInspection *bool                `yaml:"deep_inspection_mode"`
+	GeoIPDBPath          string               `yaml:"geoip_db_path"`
+	Thresholds           ThresholdConfig      `yaml:"thresholds"`
+	Weights              WeightConfig         `yaml:"weights"`
+	RateLimit            RateLimitConfig      `yaml:"rate_limit"`
+	AccountPacing        AccountPacingConfig  `yaml:"account_pacing"`
+	AccountPolicy        *AccountPolicyConfig `yaml:"account_policy"`
 }
 
 type RateLimitConfig struct {
@@ -125,6 +126,13 @@ func validateConfig(c *Config) error {
 	case ModeTransparent, ModeLearning, ModeDefender:
 	default:
 		return fmt.Errorf("invalid security.mode: %q", c.Security.Mode)
+	}
+	if c.Security.AccountPolicy == nil {
+		policy := AccountPolicyConfig(defaultAccountPolicy())
+		c.Security.AccountPolicy = &policy
+	}
+	if err := c.Security.AccountPolicy.validate(); err != nil {
+		return err
 	}
 
 	if c.Server.ListenAddr == "" || c.Server.BackendIMAPAddr == "" {
@@ -315,7 +323,7 @@ func (rt *RedisTracker) startAsyncWorker() {
 			if readErr != nil {
 				slog.Debug("Account shadow lookup failed open", "error", readErr)
 			} else {
-				decision := evaluateAccountRisk(signals, defaultAccountPolicy())
+				decision := evaluateAccountRisk(signals, event.ShadowPolicy)
 				slog.Debug("Account shadow decision", "action", decision.Action, "reason", decision.Reason, "delay", decision.Delay, "outcome", event.Outcome, "country", event.CountryCode)
 			}
 		}
@@ -398,10 +406,16 @@ func (p *IMAPProxy) connectionDecision(ctx context.Context, cfg *Config, ja4, ip
 	return EvaluateRisk(&ClientContext{JA4Known: known, CountryCode: country, RemoteIP: ip}, cfg.Security)
 }
 
-func (p *IMAPProxy) recordAuthEvent(mode OperatingMode, event authEvent) {
+func (p *IMAPProxy) recordAuthEvent(cfg *Config, event authEvent) {
 	logAuthEvent(slog.Default(), event)
-	if mode != ModeTransparent && p.tracker != nil {
-		event.ShadowRisk = mode == ModeDefender
+	if cfg.Security.Mode != ModeTransparent && p.tracker != nil {
+		event.ShadowRisk = cfg.Security.Mode == ModeDefender
+		if event.ShadowRisk {
+			event.ShadowPolicy = defaultAccountPolicy()
+			if cfg.Security.AccountPolicy != nil {
+				event.ShadowPolicy = accountPolicy(*cfg.Security.AccountPolicy)
+			}
+		}
 		p.tracker.TrackEventAsync(event)
 	}
 }
@@ -674,7 +688,7 @@ func (p *IMAPProxy) handleConnection(ctx context.Context, rawConn net.Conn) {
 	defer backendConn.Close()
 
 	observer := newAuthObserver(func(result authResult) {
-		p.recordAuthEvent(currentCfg.Security.Mode, newAuthEvent(result, remoteAddr, country, ja4Fp))
+		p.recordAuthEvent(currentCfg, newAuthEvent(result, remoteAddr, country, ja4Fp))
 	})
 	var relayErr error
 	if currentCfg.Security.Mode == ModeDefender && currentCfg.Security.AccountPacing.Enabled {
