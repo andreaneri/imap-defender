@@ -14,6 +14,8 @@ Redis conserva l'ultima osservazione per identità/origine/metodo con TTL 7 gior
 
 La modalità è fissata per sessione. SIGHUP può cambiarla per nuove connessioni, ma non può cambiare le risorse Redis o il listener. TLS usa una nuova configurazione clonata al reload. Test con race detector coprono relay TLS, coda, decisioni, timeout e cancellazione usando backend e peer RESP controllati. Il collaudo Dovecot/Redis reali rimane aperto.
 
+La valutazione account in shadow del worker Redis Defender usa `security.account_policy` ([ADR 0009](adr/0009-account-ja4-country-policy.md)). Soglie e ritardi sono validati all'avvio e al reload; i default restano sperimentali. Ogni evento porta una copia della policy fissata per la sua sessione, senza persisterla in Redis. Questi parametri controllano esclusivamente le decisioni diagnostiche del worker; il pacing nel relay conserva la configurazione indipendente `security.account_pacing` introdotta dalla PR #10. Per campi, default e limiti vedere [la configurazione](DOCUMENTAZIONE.md#policy-account-in-shadow).
+
 ## Decisione di autenticazione
 
 [ADR 0003](adr/0003-backend-authentication-authority.md) è applicato nella rimozione del mock e nell'inoltro degli esiti reali; l’integrazione con le modalità operative è implementata nei limiti descritti sopra.

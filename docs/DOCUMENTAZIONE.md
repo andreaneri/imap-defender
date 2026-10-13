@@ -304,11 +304,31 @@ Lo schema è articolato in 3 macro-sezioni:
 - **`server`**: indirizzo di bind (`listen_addr`), endpoint backend Dovecot (`backend_imap_addr`), percorsi certificato e chiave TLS (`cert_file`, `key_file`).
 - **`redis`**: endpoint Redis (`addr`) e dimensione buffer di coda eventi asincrona (`queue_buffer_size`).
 - **`security`**:
-  - `deep_inspection_mode`: booleano che commuta tra modalità perimetrale TLS e deep inspection IMAP.
+  - `mode`: `transparent` (default), `learning` o `defender`; `deep_inspection_mode` è rifiutato, secondo ADR 0005.
   - `thresholds`: soglie di intervento per `tarpit_soft`, `tarpit_hard` e `drop`.
-  - `weights`: pesi numerici per `ja4_unknown`, `geo_anomaly`, `user_not_found`, `password_invalid`, `login_success_discount`.
+  - `weights`: pesi numerici per `ja4_unknown` e `geo_anomaly`.
+  - `account_policy`: parametri della valutazione account in shadow, descritti sotto.
 
 La funzione `LoadConfig(filename string) (*Config, error)` esegue la lettura e l'unmarshaling nel modello di strutture fortemente tipizzate Go (`Config`, `ServerConfig`, `RedisConfig`, `SecurityConfig`), poi valida i campi obbligatori, gli indirizzi TCP e la dimensione positiva della coda Redis. Le soglie devono rispettare `0 < tarpit_soft < tarpit_hard < drop <= 100`; ciascun peso deve essere compreso tra 0 e 100. La stessa validazione viene applicata durante `SIGHUP`, prima di pubblicare la configurazione ricaricata.
+
+#### Policy account in shadow
+
+`security.account_policy` configura esclusivamente le decisioni diagnostiche del worker Redis per le sessioni Defender ([ADR 0009](adr/0009-account-ja4-country-policy.md)). Non abilita ritardi, rifiuti o blocchi nel relay. Transparent non accede a Redis; Learning persiste gli eventi senza questa valutazione. Le decisioni shadow sono visibili con `logging.level: debug` e si basano sulla lettura successiva alla scrittura dell'evento, che può già essere incluso nei contatori.
+
+Il pacing opt-in introdotto dalla PR #10 mantiene la configurazione separata `security.account_pacing`, descritta in [account-response-pacing.md](account-response-pacing.md). Cambiare `account_policy` non cambia le soglie o i ritardi applicati dal relay.
+
+| Campo | Default | Vincolo |
+| --- | --- | --- |
+| `soft_failures` | `3` | Intero positivo, inferiore a `hard_failures` |
+| `hard_failures` | `8` | Intero inferiore a `block_global_failures` |
+| `block_global_failures` | `20` | Intero non superiore a `1000000` |
+| `block_country_failures` | `12` | Intero positivo, non superiore a `block_global_failures` |
+| `soft_delay` | `1s` | Durata positiva, non superiore a `hard_delay` |
+| `hard_delay` | `8s` | Durata positiva, non superiore a `30s` |
+
+Il blocco può essere omesso o contenere solo i campi da cambiare: quelli mancanti mantengono i default. Le durate devono essere stringhe Go, come `250ms` o `2s`. I campi sconosciuti, le soglie frazionarie, i valori null dei singoli campi e gli zeri espliciti sono rifiutati, anche nelle modalità che non eseguono la valutazione. Un blocco vuoto o null usa i default. I valori rimangono sperimentali e non costituiscono soglie approvate per la produzione.
+
+La policy viene fissata per sessione insieme alla modalità. Un reload valido la cambia per le nuove sessioni; gli eventi già prodotti contengono una copia della policy della loro sessione, anche quando il worker li elabora dopo il reload. Una configurazione invalida viene rifiutata prima della pubblicazione. I parametri shadow non vengono persistiti in Redis. Timeout o errori nelle letture Redis saltano la valutazione; account sconosciuti producono ALLOW e GeoIP sconosciuta non può produrre BLOCK_CANDIDATE. Quest'ultima resta una decisione diagnostica senza azione di blocco.
 
 ### 7.2 Zero-Downtime Hot Reload via Segnale POSIX SIGHUP
 Per consentire l'aggiornamento delle policy, dei pesi di rischio, degli indirizzi e dei certificati crittografici TLS in produzione senza disconnettere i client attivi e senza riavviare il processo, il proxy adotta il meccanismo standard POSIX basato sull'intercettazione del segnale `SIGHUP` (`syscall.SIGHUP`).
