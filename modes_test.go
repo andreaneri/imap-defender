@@ -61,7 +61,7 @@ func TestModeDecisionAndPersistence(t *testing.T) {
 			t.Fatalf("%s mitigated", mode)
 		}
 		event := newAuthEvent(authResult{Method: "LOGIN", Outcome: "NO", Username: "user", UsernameKnown: true}, "192.0.2.1:1", "US", "fp")
-		p.recordAuthEvent(mode, event)
+		p.recordAuthEvent(cfg, event)
 		want := 0
 		if mode == ModeLearning {
 			want = 1
@@ -300,7 +300,7 @@ func testRedisPeer(t *testing.T, exists int, responders ...func([]string) string
 					}
 					if inTransaction {
 						reply := "+OK\r\n"
-						if verb == "hset" || verb == "expire" {
+						if verb == "hset" || verb == "expire" || verb == "incr" {
 							reply = ":1\r\n"
 						}
 						replies = append(replies, reply)

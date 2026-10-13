@@ -68,13 +68,25 @@ The reputation schema is telemetry only: no account-aware read is currently wire
 
 ## Shadow decision engine (feature branch)
 
-The internal `account_policy.go` adds `ReadAccountSignals` (read-only Redis pipeline with a 200 ms deadline) and a pure `evaluateAccountRisk` function returning ALLOW, PACE or BLOCK_CANDIDATE. Provisional thresholds are 3 global failures for 1 s pacing, 8 for 8 s pacing, and at least 20 global plus 12 country-local failures for a block candidate. These thresholds are not production-approved or configurable yet. Country-local corroboration is mandatory for block candidacy; unknown GeoIP cannot trigger it. Previous origin success is a signal, not a blanket exemption. Neither evaluation nor Redis lookup is called by the relay; no delay, denial, or block TTL is activated. A future integration must ensure pacing applies only to genuine backend-negative replies and enforce an explicit bounded concurrency policy.
+The internal `account_policy.go` adds `ReadAccountSignals` (read-only Redis pipeline with a 200 ms deadline) and a pure `evaluateAccountRisk` function returning ALLOW, PACE or BLOCK_CANDIDATE. Provisional default thresholds are 3 global failures for 1 s pacing, 8 for 8 s pacing, and at least 20 global plus 12 country-local failures for a block candidate. These thresholds are not production-approved; shadow configuration is described below. Country-local corroboration is mandatory for block candidacy; unknown GeoIP cannot trigger it. Previous origin success is a signal, not a blanket exemption. Neither evaluation nor Redis lookup is called by the relay; no delay, denial, or block TTL is activated. A future integration must ensure pacing applies only to genuine backend-negative replies and enforce an explicit bounded concurrency policy.
 
 ## Asynchronous Defender shadow integration
 
 The existing Redis event worker now evaluates the provisional account policy after a successful event write **only for Defender events**. The mode is captured per session in an internal `ShadowRisk` event flag. The worker performs a bounded read and logs action, reason, delay, outcome and country at debug level, without logging the account or changing client-visible behavior. Transparent does not persist and Learning persists without shadow evaluation. Redis failures skip shadow evaluation (fail open). This is diagnostic integration, **not** the protocol-aware response gate: the relay still forwards bytes without L2 pacing or account-specific blocking.
 
 Shadow reads execute serially in the Redis worker and may reduce event-queue throughput under load; monitor queue drops before making them default in a production deployment. Redis pipeline reads are not atomic snapshots and counters may already include the event just written. The shadow classification must not be interpreted as the decision that would have been available before that event. Before activating enforcement, implement an independently bounded response gate with complete IMAP framing and regression tests.
+
+## Configurable shadow policy
+
+`security.account_policy` exposes `soft_failures`, `hard_failures`, `block_global_failures`, `block_country_failures`, `soft_delay` and `hard_delay`. Omitted fields retain the provisional defaults, including when only part of the mapping is supplied. Explicit zero or null fields, fractional thresholds, unknown fields and malformed duration values are rejected. The mapping itself may be absent, empty or null to select defaults.
+
+Validation requires `0 < soft_failures < hard_failures < block_global_failures <= 1000000`, `0 < block_country_failures <= block_global_failures`, and `0 < soft_delay <= hard_delay <= 30s`. These bounds constrain configuration and diagnostics; they do not enable enforcement or make the thresholds production-approved.
+
+The configuration is immutable after publication through `AtomicConfig`. The relay captures it once per session; each Defender event carries a value copy of the shadow policy, which is internal and not persisted. The worker uses that copy instead of reading the latest configuration or hard-coded defaults. SIGHUP changes the policy for new sessions only, and invalid configuration is rejected before publication. Existing Redis read timeouts and fail-open behavior are unchanged. No response gate, timer or block action is activated by this configuration.
+
+`security.account_policy` is independent of the opt-in relay pacing configuration `security.account_pacing` introduced in PR #10. Shadow thresholds and delays do not override enforcement settings or change the behavior of an enabled pacing gate.
+
+The configurable shadow increment was validated with Go 1.24.4: `make test` (race detector), `go vet ./...`, `make build-local`, `make build-linux` and `make bench` passed. A controlled process test with real TLS and SIGHUP confirmed that an existing session retains its 1 s shadow delay, new sessions use the reloaded 17 ms value, and a rejected zero-delay reload preserves the active policy. Backend NO bytes were unchanged and the test password was absent from logs. The backend and RESP peer were controlled fixtures; Dovecot and real Redis validation remain deferred.
 
 ## Inert response-gate primitives (feature branch)
 

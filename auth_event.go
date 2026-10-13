@@ -10,11 +10,12 @@ import (
 // Observed usernames are client claims, not canonical backend account IDs.
 type authEvent struct {
 	authResult
-	Timestamp   time.Time
-	RemoteIP    string
-	CountryCode string
-	JA4         string
-	ShadowRisk  bool // Internal worker hint; not persisted.
+	Timestamp    time.Time
+	RemoteIP     string
+	CountryCode  string
+	JA4          string
+	ShadowRisk   bool          // Internal worker hint; not persisted.
+	ShadowPolicy accountPolicy // Session snapshot; not persisted.
 }
 
 func newAuthEvent(result authResult, remoteIP, countryCode, ja4 string) authEvent {

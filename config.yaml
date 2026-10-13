@@ -17,6 +17,15 @@ logging:
 
 security:
   mode: "transparent"
+  # Defender shadow diagnostics only; these values do not enable enforcement.
+  # Omitted fields keep the defaults below. Delays must be duration strings.
+  account_policy:
+    soft_failures: 3
+    hard_failures: 8
+    block_global_failures: 20
+    block_country_failures: 12
+    soft_delay: 1s
+    hard_delay: 8s
   # Only active in defender mode. Scope is ip (legacy) or ja4_ip.
   # A missing JA4 uses IP-only limiting; CIDR exceptions apply to both scopes.
   rate_limit:
